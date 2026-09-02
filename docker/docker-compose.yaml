@@ -1,0 +1,41 @@
+# Deploy the built app: `npm run build` first, then `docker compose up -d --build`.
+# The image packages only the dist/ output — the server bundle is
+# self-contained (esbuild) and serves dist/client itself.
+services:
+  friendly-ui:
+    build:
+      # Context is the repo root (where dist/ lives); the Dockerfile
+      # is in this docker/ directory. COPY paths in the Dockerfile are
+      # relative to the context, so they reference dist/ directly.
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: weblate-friendly-bridge:latest
+    container_name: weblate-friendly-bridge
+    restart: unless-stopped
+    ports:
+      - '4000:4000'
+    environment:
+      # Base URL of the Weblate instance (no trailing slash).
+      # Must be reachable from INSIDE the container:
+      #   - Weblate on the host's localhost -> http://host.docker.internal:PORT
+      #     (the extra_hosts below makes that name resolve)
+      #   - Weblate elsewhere on the LAN    -> http://<lan-ip>:PORT (default)
+      WEBLATE_URL: ${WEBLATE_URL:-http://192.168.56.220:2080}
+      # Omit to run in session mode (users sign in via the login view).
+      WEBLATE_TOKEN: ${WEBLATE_TOKEN:-}
+      WEBLATE_REVIEW_WORKFLOW: ${WEBLATE_REVIEW_WORKFLOW:-true}
+      MOCK_WEBLATE: ${MOCK_WEBLATE:-false}
+      PORT: 4000
+    # Needed only when WEBLATE_URL points at a service on the host's loopback.
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - 'fetch("http://127.0.0.1:4000/api/v1/health").then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))'
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

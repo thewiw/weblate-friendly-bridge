@@ -1,0 +1,99 @@
+@import "tailwindcss";
+
+/* Grid primitives: sticky ID + Source columns, fixed-height virtualized rows. */
+
+.wl-grid {
+  --id-col: 110px;
+  --source-col: 340px;
+  --date-col: 150px;
+  --lang-col: 280px;
+}
+
+.wl-cell {
+  @apply px-2 py-1 text-sm flex items-center gap-1 border-r border-b border-slate-200;
+  height: 44px;
+  box-sizing: border-box;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* Text inside a flex cell only truncates with min-w-0 on the item. */
+.wl-text {
+  @apply truncate min-w-0 flex-1;
+}
+
+.wl-head {
+  @apply bg-slate-100 font-semibold text-slate-700 text-xs uppercase tracking-wide;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
+.wl-sticky-id {
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  background: inherit;
+}
+
+.wl-sticky-source {
+  position: sticky;
+  left: var(--id-col);
+  z-index: 4;
+  background: inherit;
+}
+
+.wl-sticky-date {
+  position: sticky;
+  left: calc(var(--id-col) + var(--source-col));
+  z-index: 4;
+  background: inherit;
+}
+
+/* Cells need an opaque backdrop so scrolled content doesn't show through. */
+.wl-body .wl-sticky-id,
+.wl-body .wl-sticky-source {
+  background: white;
+}
+
+.wl-body .wl-row:hover .wl-sticky-id,
+.wl-body .wl-row:hover .wl-sticky-source {
+  background: #f1f5f9; /* slate-100 */
+}
+
+/* Header cells that are sticky both ways must out-z-index body stickies. */
+.wl-head.wl-sticky-id,
+.wl-head.wl-sticky-source {
+  z-index: 6;
+}
+
+/* Selection checkbox column (leftmost, sticky). */
+.wl-sticky-check {
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  background: inherit;
+}
+
+.wl-body .wl-sticky-check {
+  background: white;
+}
+
+.wl-body .wl-row:hover .wl-sticky-check {
+  background: #f1f5f9; /* slate-100 */
+}
+
+.wl-head.wl-sticky-check {
+  z-index: 6;
+}
+
+/* Selected rows are tinted, including their sticky cells. */
+.wl-body .wl-row.wl-selected {
+  background: #eff6ff; /* sky-50 */
+}
+
+.wl-body .wl-row.wl-selected .wl-sticky-id,
+.wl-body .wl-row.wl-selected .wl-sticky-source,
+.wl-body .wl-row.wl-selected .wl-sticky-check {
+  background: #eff6ff; /* sky-50 */
+}

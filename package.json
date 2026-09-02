@@ -1,0 +1,53 @@
+{
+  "name": "weblate-friendly-bridge",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,green \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "tsx watch src/server/index.ts",
+    "dev:web": "vite",
+    "build": "tsc --noEmit && vite build && esbuild src/server/index.ts --bundle --platform=node --format=cjs --target=node20 --outfile=dist/server/index.cjs",
+    "build:server": "esbuild src/server/index.ts --bundle --platform=node --format=cjs --target=node20 --outfile=dist/server/index.cjs",
+    "start": "node dist/server/index.cjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@tanstack/react-query": "^5.62.0",
+    "@tanstack/react-virtual": "^3.11.0",
+    "express": "^5.1.0",
+    "jszip": "^3.10.1",
+    "p-limit": "^6.2.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/supertest": "^6.0.2",
+    "@vitejs/plugin-react": "^4.4.0",
+    "concurrently": "^9.1.0",
+    "dotenv": "^16.4.7",
+    "esbuild": "^0.25.0",
+    "eslint": "^9.17.0",
+    "playwright": "^1.62.1",
+    "supertest": "^7.0.0",
+    "tailwindcss": "^4.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.19.0",
+    "vite": "^6.0.0",
+    "vitest": "^3.0.0"
+  }
+}
