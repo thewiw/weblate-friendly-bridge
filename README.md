@@ -36,6 +36,8 @@ everything works offline.
 | `WEBLATE_TOKEN` | Optional API token. If omitted, the app runs in **session mode**: users sign in through the login view with their Weblate account (per-user sessions, held server-side) |
 | `WEBLATE_REVIEW_WORKFLOW` | `true` if the instance has reviews enabled (affects the "not approved" filter) |
 | `MOCK_WEBLATE` | `true` forces mock mode |
+| `WEBLATE_API_KEY` | Optional server-wide Weblate API key. Together with `WEBLATE_API_ALLOWED_HOSTS` it enables public (key-less) export; also used in mock mode (any key accepted there anyway) |
+| `WEBLATE_API_ALLOWED_HOSTS` | Comma-separated client hosts in CIDR format (e.g. `192.168.56.0/24,::1`) allowed to export without an API key |
 | `PORT` | Backend port (default 4000) |
 
 ## Development
