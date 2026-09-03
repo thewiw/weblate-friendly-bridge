@@ -2,21 +2,21 @@ import 'dotenv/config';
 import { z } from 'zod';
 
 const schema = z.object({
-  WEBLATE_URL: z
+  WFB_WEBLATE_URL: z
     .string()
     .url()
     .default('http://192.168.56.220:2080')
     .transform((s) => s.replace(/\/+$/, '')),
-  WEBLATE_API_KEY: z.string().default(''),
+  WFB_WEBLATE_API_KEY: z.string().default(''),
   /** Server-wide Weblate API key for public (key-less) REST export. */
-  WEBLATE_EXPORT_API_KEY: z.string().default(''),
+  WFB_WEBLATE_EXPORT_API_KEY: z.string().default(''),
   /** Comma-separated client hosts (CIDR) allowed to use public export. */
-  WEBLATE_EXPORT_ALLOWED_HOSTS: z.string().default(''),
-  WEBLATE_REVIEW_WORKFLOW: z
+  WFB_WEBLATE_EXPORT_ALLOWED_HOSTS: z.string().default(''),
+  WFB_WEBLATE_REVIEW_WORKFLOW: z
     .string()
     .default('true')
     .transform((s) => s !== 'false'),
-  MOCK_WEBLATE: z
+  WFB_MOCK_WEBLATE: z
     .string()
     .default('false')
     .transform((s) => s === 'true'),
@@ -26,7 +26,7 @@ const schema = z.object({
    * 'try' | 'with-try' | 'with_try' | 'swagger-with-try' | 'swagger_with_try'
    * additionally enable the "Try it out" button.
    */
-  OPENAPI_UI: z
+  WFB_OPENAPI: z
     .string()
     .default('')
     .transform((s) => {
@@ -37,7 +37,7 @@ const schema = z.object({
         tryIt: tryValues.includes(v),
       };
     }),
-  PORT: z.coerce.number().int().positive().default(4000),
+  WFB_PORT: z.coerce.number().int().positive().default(4000),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -49,29 +49,29 @@ const env = parsed.data;
 
 /**
  * How upstream requests authenticate when not mocking:
- * - 'token': fixed WEBLATE_API_KEY (server-side).
+ * - 'token': fixed WFB_WEBLATE_API_KEY (server-side).
  * - 'session': users log in through the UI; their Weblate session cookie
  *   is stored server-side (no API token needed).
  */
 export const authMode: 'token' | 'session' =
-  env.WEBLATE_API_KEY !== '' ? 'token' : 'session';
+  env.WFB_WEBLATE_API_KEY !== '' ? 'token' : 'session';
 
 export const config = {
-  weblateUrl: env.WEBLATE_URL,
-  weblateApiKey: env.WEBLATE_API_KEY,
+  weblateUrl: env.WFB_WEBLATE_URL,
+  weblateApiKey: env.WFB_WEBLATE_API_KEY,
   /** Server-wide key enabling public (key-less) REST export. */
-  weblateExportApiKey: env.WEBLATE_EXPORT_API_KEY,
+  weblateExportApiKey: env.WFB_WEBLATE_EXPORT_API_KEY,
   /** Client hosts (CIDR) allowed to use public export. */
-  weblateExportAllowedHosts: env.WEBLATE_EXPORT_ALLOWED_HOSTS,
-  reviewWorkflow: env.WEBLATE_REVIEW_WORKFLOW,
-  /** 'mock' only when forced via MOCK_WEBLATE=true. */
-  mode: (env.MOCK_WEBLATE ? 'mock' : 'live') as 'mock' | 'live',
+  weblateExportAllowedHosts: env.WFB_WEBLATE_EXPORT_ALLOWED_HOSTS,
+  reviewWorkflow: env.WFB_WEBLATE_REVIEW_WORKFLOW,
+  /** 'mock' only when forced via WFB_MOCK_WEBLATE=true. */
+  mode: (env.WFB_MOCK_WEBLATE ? 'mock' : 'live') as 'mock' | 'live',
   /** Whether the OpenAPI docs page (/openapi/) and the spec are served. */
-  openapiUi: env.OPENAPI_UI.enabled,
-  /** Whether the docs page's "Try it out" button is active (OPENAPI_UI=try|with-try|…). */
-  openapiTryIt: env.OPENAPI_UI.tryIt,
+  openapiUi: env.WFB_OPENAPI.enabled,
+  /** Whether the docs page's "Try it out" button is active (WFB_OPENAPI=try|with-try|…). */
+  openapiTryIt: env.WFB_OPENAPI.tryIt,
   authMode,
-  port: env.PORT,
+  port: env.WFB_PORT,
   /** Units page size for Weblate requests (API max is 10000). */
   unitsPageSize: 1000,
   /** Max parallel requests to Weblate. */

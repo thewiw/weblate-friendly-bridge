@@ -98,7 +98,7 @@ export interface AuthHooks {
 }
 
 export interface RouterOptions {
-  /** Present in session-auth mode (no WEBLATE_API_KEY configured). */
+  /** Present in session-auth mode (no WFB_WEBLATE_API_KEY configured). */
   auth?: {
     store: WeblateSessionStore;
     /** Base URL of the Weblate instance (login target). */

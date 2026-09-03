@@ -1,7 +1,7 @@
 /**
  * Public (key-less) export on the REST API: allowed only when the server
- * is configured with both WEBLATE_EXPORT_API_KEY (a server-wide Weblate key used
- * for the underlying export) and WEBLATE_EXPORT_ALLOWED_HOSTS (the client
+ * is configured with both WFB_WEBLATE_EXPORT_API_KEY (a server-wide Weblate key used
+ * for the underlying export) and WFB_WEBLATE_EXPORT_ALLOWED_HOSTS (the client
  * hosts, as comma-separated CIDR ranges, allowed to call it without a key).
  *
  * Misconfiguration and key failures are reported: at server start
@@ -39,7 +39,7 @@ export function evaluatePublicExport(
       ok: false,
       status: 403,
       error:
-        'Public export is not enabled (WEBLATE_EXPORT_API_KEY and WEBLATE_EXPORT_ALLOWED_HOSTS must both be set)',
+        'Public export is not enabled (WFB_WEBLATE_EXPORT_API_KEY and WFB_WEBLATE_EXPORT_ALLOWED_HOSTS must both be set)',
     };
   }
   const { cidrs, invalid } = parseHostList(opts.allowedHosts);
@@ -49,8 +49,8 @@ export function evaluatePublicExport(
       status: 403,
       error:
         invalid.length > 0
-          ? `Public export disabled: invalid WEBLATE_EXPORT_ALLOWED_HOSTS entries (${invalid.join(', ')})`
-          : 'Public export disabled: WEBLATE_EXPORT_ALLOWED_HOSTS contains no valid host',
+          ? `Public export disabled: invalid WFB_WEBLATE_EXPORT_ALLOWED_HOSTS entries (${invalid.join(', ')})`
+          : 'Public export disabled: WFB_WEBLATE_EXPORT_ALLOWED_HOSTS contains no valid host',
     };
   }
   if (!anyIpAllowed(opts.clientIp, cidrs)) {
@@ -79,14 +79,14 @@ export async function reportPublicExportStatus(opts: PublicExportConfig): Promis
   }
   if (opts.apiKey.trim() === '' || opts.allowedHosts.trim() === '') {
     logWarn(
-      `${prefix} disabled — WEBLATE_EXPORT_API_KEY and WEBLATE_EXPORT_ALLOWED_HOSTS must both be set`,
+      `${prefix} disabled — WFB_WEBLATE_EXPORT_API_KEY and WFB_WEBLATE_EXPORT_ALLOWED_HOSTS must both be set`,
     );
     return;
   }
   const { cidrs, invalid } = parseHostList(opts.allowedHosts);
   if (invalid.length > 0 || cidrs.length === 0) {
     logError(
-      `${prefix} disabled — invalid WEBLATE_EXPORT_ALLOWED_HOSTS: ${
+      `${prefix} disabled — invalid WFB_WEBLATE_EXPORT_ALLOWED_HOSTS: ${
         invalid.length > 0 ? invalid.join(', ') : 'no valid entry'
       }`,
     );
@@ -106,7 +106,7 @@ export async function reportPublicExportStatus(opts: PublicExportConfig): Promis
   const username = await validate(opts.apiKey.trim());
   if (username === null) {
     logError(
-      `${prefix} configured WEBLATE_EXPORT_API_KEY was rejected by Weblate — public export unavailable until the key works again`,
+      `${prefix} configured WFB_WEBLATE_EXPORT_API_KEY was rejected by Weblate — public export unavailable until the key works again`,
     );
     return;
   }

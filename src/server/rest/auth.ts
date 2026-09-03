@@ -5,7 +5,7 @@
  * for the underlying Weblate calls, so permissions follow the key.
  *
  * Exception: key-less requests to /export may be served with the
- * server-wide WEBLATE_EXPORT_API_KEY when public export is configured
+ * server-wide WFB_WEBLATE_EXPORT_API_KEY when public export is configured
  * (see public-export.ts).
  */
 import type { Request, Response, NextFunction } from 'express';
@@ -160,13 +160,13 @@ export function createApiKeyAuth(opts: RestAuthOptions) {
           if (username === null) {
 
             logError(
-              '[rest] Public export: configured WEBLATE_EXPORT_API_KEY was rejected by Weblate — public export unavailable until it works again',
+              '[rest] Public export: configured WFB_WEBLATE_EXPORT_API_KEY was rejected by Weblate — public export unavailable until it works again',
             );
             reject(
               req,
               res,
               503,
-              'Public export temporarily unavailable: the configured WEBLATE_EXPORT_API_KEY was rejected by Weblate',
+              'Public export temporarily unavailable: the configured WFB_WEBLATE_EXPORT_API_KEY was rejected by Weblate',
             );
             return;
           }

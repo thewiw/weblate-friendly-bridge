@@ -12,7 +12,7 @@ import { logInfo } from './log.js';
 const api = createWeblateApi();
 const registry = new CacheRegistry(api);
 
-// Session mode (no WEBLATE_API_KEY): users authenticate through the login
+// Session mode (no WFB_WEBLATE_API_KEY): users authenticate through the login
 // view; each browser session gets its own server-side Weblate session.
 const opts =
   config.mode === 'live' && config.authMode === 'session'
@@ -42,11 +42,11 @@ void reportPublicExportStatus({
 const clientDir = path.resolve(process.cwd(), 'dist/client');
 if (existsSync(clientDir)) {
   // The docs page is static in dist/client (public/openapi/) — hide it
-  // (and its assets) when OPENAPI_UI is not enabled. Registered before
+  // (and its assets) when WFB_OPENAPI is not enabled. Registered before
   // express.static so it takes precedence.
   if (!config.openapiUi) {
     app.use('/openapi', (_req, res) => {
-      res.status(404).json({ error: 'Swagger UI disabled — set OPENAPI_UI=true to enable' });
+      res.status(404).json({ error: 'Swagger UI disabled — set WFB_OPENAPI=true to enable' });
     });
   }
   app.use(express.static(clientDir));

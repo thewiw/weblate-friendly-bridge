@@ -19,12 +19,12 @@ all-languages-in-one-request endpoint, so this app's Node backend:
 ## Setup
 
 ```bash
-cp .env.example .env   # then fill in WEBLATE_API_KEY
+cp .env.example .env   # then fill in WFB_WEBLATE_API_KEY
 npm install
 npm run dev            # server :4000 + vite :5173, open http://localhost:5173
 ```
 
-Without `WEBLATE_URL`/`WEBLATE_API_KEY` (or with `MOCK_WEBLATE=true`) the app
+Without `WFB_WEBLATE_URL`/`WFB_WEBLATE_API_KEY` (or with `WFB_MOCK_WEBLATE=true`) the app
 runs against a deterministic in-memory mock — including editable units — so
 everything works offline.
 
@@ -32,14 +32,14 @@ everything works offline.
 
 | Variable | Meaning |
 |---|---|
-| `WEBLATE_URL` | Base URL of the Weblate instance |
-| `WEBLATE_API_KEY` | Optional API token. If omitted, the app runs in **session mode**: users sign in through the login view with their Weblate account (per-user sessions, held server-side) |
-| `WEBLATE_REVIEW_WORKFLOW` | `true` if the instance has reviews enabled (affects the "not approved" filter) |
-| `MOCK_WEBLATE` | `true` forces mock mode |
-| `WEBLATE_EXPORT_API_KEY` | Optional server-wide Weblate API key. Together with `WEBLATE_EXPORT_ALLOWED_HOSTS` it enables public (key-less) export; also used in mock mode (any key accepted there anyway) |
-| `WEBLATE_EXPORT_ALLOWED_HOSTS` | Comma-separated client hosts in CIDR format (e.g. `192.168.56.0/24,::1`) allowed to export without an API key |
-| `PORT` | Backend port (default 4000) |
-| `OPENAPI_UI` | Opt-in: serves the REST API docs page (`/openapi/`) and the OpenAPI spec (`/api/rest/v1/openapi.json`). Values are matched case- and blank-insensitively: `true`, `on` or `1` enable read-only docs; `try`, `with-try`, `with_try`, `swagger-with-try` or `swagger_with_try` also enable the "Try it out" button. Anything else (or unset) answers 404 |
+| `WFB_WEBLATE_URL` | Base URL of the Weblate instance |
+| `WFB_WEBLATE_API_KEY` | Optional API token. If omitted, the app runs in **session mode**: users sign in through the login view with their Weblate account (per-user sessions, held server-side) |
+| `WFB_WEBLATE_REVIEW_WORKFLOW` | `true` if the instance has reviews enabled (affects the "not approved" filter) |
+| `WFB_MOCK_WEBLATE` | `true` forces mock mode |
+| `WFB_WEBLATE_EXPORT_API_KEY` | Optional server-wide Weblate API key. Together with `WFB_WEBLATE_EXPORT_ALLOWED_HOSTS` it enables public (key-less) export; also used in mock mode (any key accepted there anyway) |
+| `WFB_WEBLATE_EXPORT_ALLOWED_HOSTS` | Comma-separated client hosts in CIDR format (e.g. `192.168.56.0/24,::1`) allowed to export without an API key |
+| `WFB_PORT` | Backend port (default 4000) |
+| `WFB_OPENAPI` | Opt-in: serves the REST API docs page (`/openapi/`) and the OpenAPI spec (`/api/rest/v1/openapi.json`). Values are matched case- and blank-insensitively: `true`, `on` or `1` enable read-only docs; `try`, `with-try`, `with_try`, `swagger-with-try` or `swagger_with_try` also enable the "Try it out" button. Anything else (or unset) answers 404 |
 
 ## Development
 
@@ -76,7 +76,7 @@ The REST API is documented as an OpenAPI 3 spec with a browsable Swagger UI:
 - **Docs page**: `http://<host>:<port>/openapi/`
 - **Raw spec**: `http://<host>:<port>/api/rest/v1/openapi.json`
 
-The docs are **opt-in**: set `OPENAPI_UI` to `true`, `on` or `1` (read-only
+The docs are **opt-in**: set `WFB_OPENAPI` to `true`, `on` or `1` (read-only
 docs), or `try` / `with-try` / `with_try` / `swagger-with-try` /
 `swagger_with_try` to also enable the "Try it out" button
 (values are case- and blank-insensitive; anything else, or unset, answers 404
@@ -113,8 +113,8 @@ Untranslated strings export as empty values; plural targets as suffixed keys
 (`key_0`, `key_1`, …); strings are keyed by context, falling back to the
 source text for key-less components.
 
-**Public (key-less) export**: when both `WEBLATE_EXPORT_API_KEY` (a server-wide
-Weblate API key) and `WEBLATE_EXPORT_ALLOWED_HOSTS` (comma-separated client
+**Public (key-less) export**: when both `WFB_WEBLATE_EXPORT_API_KEY` (a server-wide
+Weblate API key) and `WFB_WEBLATE_EXPORT_ALLOWED_HOSTS` (comma-separated client
 hosts in CIDR format, e.g. `192.168.56.0/24,::1`) are set, export requests
 without an API key are accepted from those hosts and run under the
 server-wide key. A bare IP matches that one address only — to allow **any**
@@ -159,18 +159,21 @@ The app is then on http://localhost:4000. Configuration is passed through
 compose environment variables (no `.env` file is baked into the image):
 
 ```bash
-WEBLATE_URL=http://192.168.56.220:2080 \
-WEBLATE_API_KEY=... \
+WFB_WEBLATE_URL=http://192.168.56.220:2080 \
+WFB_WEBLATE_API_KEY=... \
 docker compose -f docker/docker-compose.yaml up -d --build
 ```
 
 Notes:
 
-- `WEBLATE_URL` must be reachable **from inside the container**. For a
+- `WFB_WEBLATE_URL` must be reachable **from inside the container**. For a
   Weblate running on the host's loopback, use
   `http://host.docker.internal:<port>` (the compose file already adds the
   `host-gateway` mapping); otherwise use the LAN IP.
 - The healthcheck probes `/api/v1/health`.
+- The container defaults to the name `weblate-friendly-bridge`; override it
+  with `WFB_CONTAINER_NAME` (e.g. `WFB_CONTAINER_NAME=wfb-dev docker compose
+  up -d --build`).
 
 ## Architecture
 

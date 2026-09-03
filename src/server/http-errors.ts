@@ -49,7 +49,7 @@ export function mapUpstreamStatus(
     case 401:
       return new UpstreamError(
         502,
-        'Weblate rejected our API token (unauthorized). Check WEBLATE_API_KEY.',
+        'Weblate rejected our API token (unauthorized). Check WFB_WEBLATE_API_KEY.',
       );
     case 403:
       return new UpstreamError(

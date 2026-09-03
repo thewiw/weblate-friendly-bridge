@@ -35,13 +35,13 @@ export function createRestRouter(opts: RestRouterOptions) {
 
   // The API description itself is not sensitive and must load without a
   // key (the Swagger UI page at /openapi/ fetches it) — mounted before auth.
-  // Only served when OPENAPI_UI enables the docs (opt-in, see config.ts).
+  // Only served when WFB_OPENAPI enables the docs (opt-in, see config.ts).
   // The `x-try-it-out` extension tells the docs page whether the "Try it
-  // out" button is active (OPENAPI_UI=with-try) — the page is static, so
+  // out" button is active (WFB_OPENAPI=with-try) — the page is static, so
   // this is the channel it reads the flag from.
   router.get('/openapi.json', (_req, res) => {
     if (!config.openapiUi) {
-      res.status(404).json({ error: 'Not found (Swagger UI disabled — set OPENAPI_UI=true to enable)' });
+      res.status(404).json({ error: 'Not found (Swagger UI disabled — set WFB_OPENAPI=true to enable)' });
       return;
     }
     res.json({ ...openApiSpec, 'x-try-it-out': config.openapiTryIt });
@@ -52,7 +52,7 @@ export function createRestRouter(opts: RestRouterOptions) {
     mode: opts.mockApi.mode,
     mockApi: opts.mockApi,
     // Key-less /export requests may run under the server-wide key when
-    // both WEBLATE_EXPORT_API_KEY and WEBLATE_EXPORT_ALLOWED_HOSTS are set.
+    // both WFB_WEBLATE_EXPORT_API_KEY and WFB_WEBLATE_EXPORT_ALLOWED_HOSTS are set.
     publicExport: {
       apiKey: config.weblateExportApiKey,
       allowedHosts: config.weblateExportAllowedHosts,

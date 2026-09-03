@@ -29,7 +29,7 @@ COPY --from=build /app/dist/client dist/client
 
 # app.listen(port) binds all interfaces, so the port is reachable
 # from outside the container without extra configuration.
-ENV PORT=4000
+ENV WFB_PORT=4000
 
 EXPOSE 4000
 
