@@ -39,7 +39,7 @@ everything works offline.
 | `WFB_WEBLATE_EXPORT_API_KEY` | Optional server-wide Weblate API key. Together with `WFB_WEBLATE_EXPORT_ALLOWED_HOSTS` it enables public (key-less) export; also used in mock mode (any key accepted there anyway) |
 | `WFB_WEBLATE_EXPORT_ALLOWED_HOSTS` | Comma-separated client hosts in CIDR format (e.g. `192.168.56.0/24,::1`) allowed to export without an API key |
 | `WFB_PORT` | Backend port (default 4000) |
-| `WFB_OPENAPI` | Opt-in: serves the REST API docs page (`/openapi/`) and the OpenAPI spec (`/api/rest/v1/openapi.json`). Values are matched case- and blank-insensitively: `true`, `on` or `1` enable read-only docs; `try`, `with-try`, `with_try`, `swagger-with-try` or `swagger_with_try` also enable the "Try it out" button. Anything else (or unset) answers 404 |
+| `WFB_OPENAPI` | Opt-in: serves the REST API docs page (`/openapi/`) and the OpenAPI spec (`/api/rest/v1/openapi.json`). Values are matched case- and blank-insensitively: `true`, `on` or `1` enable read-only docs; `try`, `with-try`, `with_try`, `openapi-with-try` or `openapi_with_try` also enable the "Try it out" button. Anything else (or unset) answers 404 |
 
 ## Development
 
@@ -58,7 +58,7 @@ external callers — authenticated with a **Weblate API key**
 
 - **REST** at `/api/rest/v1`: list projects/components, batch-create strings,
   patch/delete translations by context key, and `POST /export`
-  (documented in the Swagger UI, see below).
+  (documented in the OpenAPI UI, see below).
 - **MCP** at `/mcp/v1`: the same operations as MCP tools over streamable
   HTTP (stateless, JSON responses): `list_projects`, `list_components`,
   `create_strings`, `patch_translations`, `delete_translation`.
@@ -69,22 +69,22 @@ external callers — authenticated with a **Weblate API key**
   progress, and `GET /api/v1/export-jobs/:jobId/result` delivers the finished
   payload — the dialog shows a progress bar while the job runs.
 
-### API documentation (Swagger UI)
+### API documentation (OpenAPI UI)
 
-The REST API is documented as an OpenAPI 3 spec with a browsable Swagger UI:
+The REST API is documented as an OpenAPI 3 spec with a browsable OpenAPI UI:
 
 - **Docs page**: `http://<host>:<port>/openapi/`
 - **Raw spec**: `http://<host>:<port>/api/rest/v1/openapi.json`
 
 The docs are **opt-in**: set `WFB_OPENAPI` to `true`, `on` or `1` (read-only
-docs), or `try` / `with-try` / `with_try` / `swagger-with-try` /
-`swagger_with_try` to also enable the "Try it out" button
+docs), or `try` / `with-try` / `with_try` / `openapi-with-try` /
+`openapi_with_try` to also enable the "Try it out" button
 (values are case- and blank-insensitive; anything else, or unset, answers 404
 for both the page and the spec). The spec endpoint needs no API key, and
 "Try it out" sends whatever key you enter under *Authorize* as
 `Authorization: Token <key>`.
 
-The Swagger UI assets (swagger-ui-dist) are vendored in the repo at
+The OpenAPI UI assets are vendored in the repo at
 `public/openapi/` and served as static files — no CDN or internet access
 needed at runtime. The spec itself is hand-written in
 `src/server/rest/openapi.ts`; update it when the REST endpoints change.
@@ -126,12 +126,35 @@ export; a key rejected by Weblate (at start or later) is reported and answers
 503 until it works again.
 
 Both share one implementation (`src/server/rest/operations.ts`). Connect an
-MCP client (Claude Code example):
+MCP client (Claude Code examples below):
+
+**Claude Code running directly on the host** (the server is on the same
+machine, default port 4000):
 
 ```bash
 claude mcp add --transport http wfu http://localhost:4000/mcp/v1 \
   --header "X-API-Key: <weblate-api-key>"
 ```
+
+**Claude Code running inside a Docker sandbox** (a devcontainer, a sandboxed
+CLI, …): the sandbox has its own `localhost`, so `localhost:4000` points at
+the sandbox itself, not at the host. Reach the host through
+`host.docker.internal` instead (built into Docker Desktop; on plain Linux it
+resolves if the container was started with `--add-host=host.docker.internal:host-gateway`):
+
+```bash
+claude mcp add --transport http wfu http://host.docker.internal:4000/mcp/v1 \
+  --header "X-API-Key: <weblate-api-key>"
+```
+
+If `host.docker.internal` is unavailable in your sandbox, use the host's
+LAN IP instead (e.g. `http://192.168.56.1:4000/mcp/v1`) — any address the
+host's Docker bridge can reach works, as long as the server's port is
+reachable from the container.
+
+Tip: add `-s user` before `add` to register the server for all projects
+instead of the current one, and run `claude mcp list` to verify the
+connection.
 
 States: 0 untranslated (empty target), 10 needs editing, 20 translated,
 30 approved. Per-language deletion means *clearing* (Weblate cannot delete

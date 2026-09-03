@@ -21,9 +21,10 @@ const schema = z.object({
     .default('false')
     .transform((s) => s === 'true'),
   /**
-   * Opt-in Swagger UI for the REST API. The value is matched case- and
+   * Opt-in OpenAPI UI for the REST API. The value is matched case- and
    * blank-insensitively: 'true' | 'on' | '1' enable the docs read-only;
-   * 'try' | 'with-try' | 'with_try' | 'swagger-with-try' | 'swagger_with_try'
+   * 'try' | 'with-try' | 'with_try' | 'openapi-with-try' | 'openapi_with_try'
+   * (legacy spellings 'swagger-with-try' / 'swagger_with_try' still work)
    * additionally enable the "Try it out" button.
    */
   WFB_OPENAPI: z
@@ -31,7 +32,16 @@ const schema = z.object({
     .default('')
     .transform((s) => {
       const v = s.trim().toLowerCase();
-      const tryValues = ['try', 'with-try', 'with_try', 'swagger-with-try', 'swagger_with_try'];
+      const tryValues = [
+        'try',
+        'with-try',
+        'with_try',
+        'openapi-with-try',
+        'openapi_with_try',
+        // Legacy spellings kept accepted for existing deployments.
+        'swagger-with-try',
+        'swagger_with_try',
+      ];
       return {
         enabled: ['true', 'on', '1', ...tryValues].includes(v),
         tryIt: tryValues.includes(v),
