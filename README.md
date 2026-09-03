@@ -133,34 +133,9 @@ Both share one implementation (`src/server/rest/operations.ts`).
 machine, default port 4000):
 
 ```bash
-claude mcp add --transport http wfu http://localhost:4000/mcp/v1 \
+claude mcp add --transport http wfb http://localhost:4000/mcp/v1 \
   --header "X-API-Key: <weblate-api-key>"
 ```
-
-**Claude Code running inside a Docker sandbox** (a devcontainer, a sandboxed
-CLI, …): the sandbox has its own `localhost`, so `localhost:4000` points at
-the sandbox itself, not at the host. Reach the host through
-`host.docker.internal` instead (built into Docker Desktop; on plain Linux it
-resolves if the container was started with `--add-host=host.docker.internal:host-gateway`):
-
-```bash
-claude mcp add --transport http wfu http://host.docker.internal:4000/mcp/v1 \
-  --header "X-API-Key: <weblate-api-key>"
-```
-
-If `host.docker.internal` is unavailable in your sandbox, use the host's
-LAN IP instead (e.g. `http://192.168.56.1:4000/mcp/v1`) — any address the
-host's Docker bridge can reach works, as long as the server's port is
-reachable from the container.
-
-Tip: add `-s user` before `add` to register the server for all projects
-instead of the current one, and run `claude mcp list` to verify the
-connection.
-
-States: 0 untranslated (empty target), 10 needs editing, 20 translated,
-30 approved. Per-language deletion means *clearing* (Weblate cannot delete
-individual target units); deleting the whole string requires the source
-language + `all=true`.
 
 ## Docker deployment
 
