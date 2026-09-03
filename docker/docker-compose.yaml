@@ -14,7 +14,10 @@ services:
     container_name: ${WFB_CONTAINER_NAME:-weblate-friendly-bridge}
     restart: unless-stopped
     ports:
-      - '4000:4000'
+      # Host side via WFB_CONTAINER_PORT: a port ("8080" → 0.0.0.0:8080)
+      # or an "ip:port" binding ("127.0.0.1:8080" or "192.168.1.5:8080").
+      # The container-side port stays 4000.
+      - '${WFB_CONTAINER_PORT:-4000}:4000'
     environment:
       # Base URL of the Weblate instance (no trailing slash).
       # Must be reachable from INSIDE the container:

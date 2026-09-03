@@ -4,4 +4,5 @@ node_modules
 dist
 .git
 .env
+docker/.env
 *.log

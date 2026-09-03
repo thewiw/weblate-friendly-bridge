@@ -156,13 +156,22 @@ docker build -f docker/Dockerfile -t weblate-friendly-bridge:latest .
 ```
 
 The app is then on http://localhost:4000. Configuration is passed through
-compose environment variables (no `.env` file is baked into the image):
+compose environment variables (no `.env` file is baked into the image).
+With `-f docker/docker-compose.yaml`, the Compose **project directory is
+`docker/`**, so it looks for `.env` there — either put it next to the
+compose file, or point at it explicitly with `--env-file`:
 
 ```bash
+# .env next to the compose file (docker/.env), or inline:
 WFB_WEBLATE_URL=http://192.168.56.220:2080 \
 WFB_WEBLATE_API_KEY=... \
 docker compose -f docker/docker-compose.yaml up -d --build
+
+# or reuse the repo-root .env (the one `npm run dev` uses):
+docker compose -f docker/docker-compose.yaml --env-file .env up -d --build
 ```
+
+A `.env` at the repo root is **not** picked up without `--env-file`.
 
 Notes:
 
@@ -174,6 +183,11 @@ Notes:
 - The container defaults to the name `weblate-friendly-bridge`; override it
   with `WFB_CONTAINER_NAME` (e.g. `WFB_CONTAINER_NAME=wfb-dev docker compose
   up -d --build`).
+- The host-side binding defaults to port `4000` on all interfaces; override
+  it with `WFB_CONTAINER_PORT` — either a port (`WFB_CONTAINER_PORT=8080`)
+  or an `ip:port` binding (`WFB_CONTAINER_PORT=127.0.0.1:8080` or
+  `WFB_CONTAINER_PORT=192.168.1.5:8080`). The port inside the container
+  stays `4000`.
 
 ## Architecture
 
