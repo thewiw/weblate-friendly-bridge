@@ -5,12 +5,13 @@
  * for the underlying Weblate calls, so permissions follow the key.
  *
  * Exception: key-less requests to /export may be served with the
- * server-wide WEBLATE_API_KEY when public export is configured
+ * server-wide WEBLATE_EXPORT_API_KEY when public export is configured
  * (see public-export.ts).
  */
 import type { Request, Response, NextFunction } from 'express';
 import { createTokenWeblateApi, type WeblateApi } from '../weblate/client.js';
 import { evaluatePublicExport } from './public-export.js';
+import { logError } from '../log.js';
 
 export interface RestAuth {
   username: string;
@@ -121,6 +122,12 @@ export function createKeyValidator(
 export function createApiKeyAuth(opts: RestAuthOptions) {
   const validate = createKeyValidator(opts.weblateUrl);
 
+  /** Logs every client-facing rejection (they bypass the errorHandler). */
+  const reject = (req: Request, res: Response, status: number, error: string, detail?: string): void => {
+    logError(`[rest] ${req.method} ${req.originalUrl} → ${status}: ${error}${detail !== undefined ? ` (${detail})` : ''}`);
+    res.status(status).json({ error });
+  };
+
   return (req: Request, res: Response, next: NextFunction): void => {
     const key = extractApiKey(req);
     if (key === null) {
@@ -135,7 +142,7 @@ export function createApiKeyAuth(opts: RestAuthOptions) {
             clientIp: req.ip ?? '',
           });
           if (!decision.ok) {
-            res.status(decision.status).json({ error: decision.error });
+            reject(req, res, decision.status, decision.error, decision.detail);
             return;
           }
           if (opts.mode === 'mock') {
@@ -147,14 +154,16 @@ export function createApiKeyAuth(opts: RestAuthOptions) {
           // request; every working→failed transition is reported).
           const username = await validate(opts.publicExport!.apiKey.trim());
           if (username === null) {
-            // eslint-disable-next-line no-console
-            console.error(
-              '[rest] Public export: configured WEBLATE_API_KEY was rejected by Weblate — public export unavailable until it works again',
+
+            logError(
+              '[rest] Public export: configured WEBLATE_EXPORT_API_KEY was rejected by Weblate — public export unavailable until it works again',
             );
-            res.status(503).json({
-              error:
-                'Public export temporarily unavailable: the configured WEBLATE_API_KEY was rejected by Weblate',
-            });
+            reject(
+              req,
+              res,
+              503,
+              'Public export temporarily unavailable: the configured WEBLATE_EXPORT_API_KEY was rejected by Weblate',
+            );
             return;
           }
           req.restAuth = {
@@ -167,7 +176,7 @@ export function createApiKeyAuth(opts: RestAuthOptions) {
         });
         return;
       }
-      res.status(401).json({ error: 'Missing API key (Authorization: Token <key>)' });
+      reject(req, res, 401, 'Missing API key (Authorization: Token <key>)');
       return;
     }
     void (async () => {
@@ -178,7 +187,7 @@ export function createApiKeyAuth(opts: RestAuthOptions) {
       } else {
         username = await validate(key);
         if (username === null) {
-          res.status(401).json({ error: 'Invalid Weblate API key' });
+          reject(req, res, 401, 'Invalid Weblate API key');
           return;
         }
       }
@@ -190,8 +199,10 @@ export function createApiKeyAuth(opts: RestAuthOptions) {
             : createTokenWeblateApi(opts.weblateUrl, key),
       };
       next();
-    })().catch(() => {
-      res.status(401).json({ error: 'Invalid Weblate API key' });
+    })().catch((err: unknown) => {
+
+      logError('[rest] key validation failed:', err instanceof Error ? err.message : err);
+      reject(req, res, 401, 'Invalid Weblate API key');
     });
   };
 }

@@ -272,7 +272,7 @@ export function createWeblateApi(): WeblateApi {
   }
   return new LiveWeblateClient(config.weblateUrl, {
     kind: 'token',
-    token: config.weblateToken,
+    token: config.weblateApiKey,
   });
 }
 

@@ -25,6 +25,7 @@ import { config } from '../config.js';
 import type { CacheRegistry } from '../cache/cache-registry.js';
 import type { WeblateApi } from '../weblate/client.js';
 import { createApiKeyAuth } from '../rest/auth.js';
+import { logError } from '../log.js';
 
 const SERVER_INFO = { name: 'weblate-friendly-bridge', version: '0.1.0' } as const;
 
@@ -51,16 +52,22 @@ function buildServer(api: WeblateApi, registry: CacheRegistry): McpServer {
     content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
   });
 
-  /** Expected failures (bad context, Weblate rejection) → tool error, not protocol error. */
+  /**
+   * Expected failures (bad context, Weblate rejection) → tool error, not
+   * protocol error. Every tool error is logged to the console (one line for
+   * expected failures, with stack for unexpected ones).
+   */
   const fail = (err: unknown) => {
     const message =
       err instanceof UpstreamError
         ? err.message
         : 'Internal error: ' + (err instanceof Error ? err.message : String(err));
-    if (!(err instanceof UpstreamError)) {
-      // eslint-disable-next-line no-console
-      console.error('[mcp]', err instanceof Error ? `${err.message}\n${err.stack}` : err);
-    }
+
+    logError(
+      '[mcp] tool error:',
+      message,
+      ...(err instanceof UpstreamError ? [] : [err instanceof Error ? `\n${err.stack}` : err]),
+    );
     return { content: [{ type: 'text' as const, text: message }], isError: true as const };
   };
 

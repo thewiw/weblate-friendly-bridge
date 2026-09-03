@@ -1,7 +1,8 @@
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'node_modules/**'] },
+  // public/ holds vendored third-party assets (Swagger UI bundle) — not our code.
+  { ignores: ['dist/**', 'node_modules/**', 'public/**'] },
   ...tseslint.configs.recommended,
   {
     rules: {

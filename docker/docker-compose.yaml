@@ -22,10 +22,18 @@ services:
       #   - Weblate elsewhere on the LAN    -> http://<lan-ip>:PORT (default)
       WEBLATE_URL: ${WEBLATE_URL:-http://192.168.56.220:2080}
       # Omit to run in session mode (users sign in via the login view).
-      WEBLATE_TOKEN: ${WEBLATE_TOKEN:-}
+      WEBLATE_API_KEY: ${WEBLATE_API_KEY:-}
       WEBLATE_REVIEW_WORKFLOW: ${WEBLATE_REVIEW_WORKFLOW:-true}
       MOCK_WEBLATE: ${MOCK_WEBLATE:-false}
       PORT: 4000
+      # Public (key-less) REST export: both must be set to allow export
+      # requests without an API key from the allowed CIDR hosts.
+      WEBLATE_EXPORT_API_KEY: ${WEBLATE_EXPORT_API_KEY:-}
+      WEBLATE_EXPORT_ALLOWED_HOSTS: ${WEBLATE_EXPORT_ALLOWED_HOSTS:-}
+      # Opt-in Swagger UI docs (/openapi/): true/on/1 read-only, try /
+      # with-try / with_try / swagger-with-try / swagger_with_try also
+      # enable "Try it out" (case-insensitive).
+      SWAGGER_UI: ${SWAGGER_UI:-}
     # Needed only when WEBLATE_URL points at a service on the host's loopback.
     extra_hosts:
       - 'host.docker.internal:host-gateway'

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../../server/app.js';
 import { CacheRegistry } from '../../server/cache/cache-registry.js';
@@ -33,7 +33,21 @@ async function getRowsUntilComplete(
 
 const BASE = '/api/rest/v1/projects/friendly-suite/components/web-ui';
 
+// These tests assume the default SWAGGER_UI state; another test file sets
+// the variable in the same worker process (env is shared across files).
+// vi.hoisted runs before the static imports, so config.ts (which evaluates
+// the env at import time) sees the pinned value.
+vi.hoisted(() => {
+  process.env.SWAGGER_UI = '';
+});
+
 describe('REST API authentication', () => {
+  it('hides the OpenAPI spec unless SWAGGER_UI is enabled (default off)', async () => {
+    const { app } = makeApp();
+    const res = await request(app).get('/api/rest/v1/openapi.json').expect(404);
+    expect((res.body as { error: string }).error).toContain('SWAGGER_UI');
+  });
+
   it('rejects requests without a key', async () => {
     const { app } = makeApp();
     await request(app).get(`${BASE.replace('/friendly-suite/components/web-ui', '')}/projects`).expect(401);
@@ -83,6 +97,18 @@ describe('REST listings', () => {
 });
 
 describe('REST create translations', () => {
+  it('answers 400 (not 500) for a malformed JSON body, with the parser detail', async () => {
+    const { app } = makeApp();
+    // Trailing comma — the classic "Expected double-quoted property name".
+    const res = await request(app)
+      .post(`${BASE}/translations`)
+      .set(AUTH)
+      .set('Content-Type', 'application/json')
+      .send('{"items":[{"source":"x","translations":{"en":"y",}}]}')
+      .expect(400);
+    expect((res.body as { error: string }).error).toContain('Malformed request body');
+  });
+
   it('creates a string with explicit context and a Needs-editing translation', async () => {
     const { app } = makeApp();
     const res = await request(app)

@@ -5,7 +5,12 @@ import {
   useQueryClient,
 } from '@tanstack/react-query';
 import type { RowsPage, SortKey, UnitPatchResult } from '../../shared/rows.js';
-import type { ExportRequest, ExportResponse } from '../../shared/export.js';
+import type {
+  ExportJobState,
+  ExportProgress,
+  ExportRequest,
+  ExportResponse,
+} from '../../shared/export.js';
 import type { UnitState, WeblateComponent, WeblateProject } from '../../shared/weblate-dto.js';
 import { api, ApiError } from './http.js';
 
@@ -156,45 +161,64 @@ function downloadBlob(blob: Blob, name: string): void {
   URL.revokeObjectURL(url);
 }
 
-/**
- * Runs an export (POST /export) and downloads the result: the zip archive
- * itself, or one download per file when packaging is 'json'.
- */
-export async function exportTranslations(request: ExportRequest): Promise<void> {
-  let res: Response;
-  try {
-    res = await fetch('/api/v1/export', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
-      // Exports can fetch many translations — more headroom than the 30s API default.
-      signal: AbortSignal.timeout(120_000),
-    });
-  } catch (err) {
-    throw new ApiError(
-      0,
-      err instanceof DOMException && err.name === 'TimeoutError'
-        ? 'Export timed out'
-        : 'Backend unreachable',
-    );
-  }
-  if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
-    throw new ApiError(res.status, body?.error ?? `HTTP ${res.status}`);
-  }
+export interface ExportVars {
+  request: ExportRequest;
+  onProgress?: (p: ExportProgress) => void;
+}
 
-  if (request.packaging === 'zip') {
-    downloadBlob(await res.blob(), 'export.zip');
-    return;
-  }
-  const body = (await res.json()) as ExportResponse;
-  for (const file of body.files) {
-    const bytes = Uint8Array.from(atob(file.contentBase64), (c) => c.charCodeAt(0));
-    downloadBlob(
-      new Blob([bytes], { type: 'application/json' }),
-      file.name.split('/').pop() ?? file.name,
-    );
-  }
+/**
+ * Runs an export as a background job and downloads the result: the zip
+ * archive itself, or one download per file when packaging is 'json'.
+ * Mirrors useBulkState: POST /export returns a jobId at once, we poll
+ * /export-jobs/:jobId for progress, then fetch the finished payload.
+ */
+export function useExport() {
+  return useMutation({
+    mutationFn: async (vars: ExportVars): Promise<void> => {
+      const { jobId } = await api<{ jobId: string }>('/export', {
+        method: 'POST',
+        body: JSON.stringify(vars.request),
+      });
+      for (;;) {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        const st = await api<ExportJobState>(`/export-jobs/${jobId}`);
+        vars.onProgress?.(st);
+        if (st.status === 'error') throw new Error(st.error ?? 'Export failed');
+        if (st.status === 'done') break;
+      }
+      // The result can be a binary zip — raw fetch, not api() (JSON only).
+      let res: Response;
+      try {
+        res = await fetch(`/api/v1/export-jobs/${jobId}/result`, {
+          signal: AbortSignal.timeout(120_000),
+        });
+      } catch (err) {
+        throw new ApiError(
+          0,
+          err instanceof DOMException && err.name === 'TimeoutError'
+            ? 'Export download timed out'
+            : 'Backend unreachable',
+        );
+      }
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new ApiError(res.status, body?.error ?? `HTTP ${res.status}`);
+      }
+
+      if (vars.request.packaging === 'zip') {
+        downloadBlob(await res.blob(), 'export.zip');
+        return;
+      }
+      const body = (await res.json()) as ExportResponse;
+      for (const file of body.files) {
+        const bytes = Uint8Array.from(atob(file.contentBase64), (c) => c.charCodeAt(0));
+        downloadBlob(
+          new Blob([bytes], { type: 'application/json' }),
+          file.name.split('/').pop() ?? file.name,
+        );
+      }
+    },
+  });
 }
 
 export function useRows(p: RowsQueryParams) {

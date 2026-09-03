@@ -7,11 +7,11 @@ const schema = z.object({
     .url()
     .default('http://192.168.56.220:2080')
     .transform((s) => s.replace(/\/+$/, '')),
-  WEBLATE_TOKEN: z.string().default(''),
-  /** Server-wide Weblate API key for public (key-less) REST export. */
   WEBLATE_API_KEY: z.string().default(''),
+  /** Server-wide Weblate API key for public (key-less) REST export. */
+  WEBLATE_EXPORT_API_KEY: z.string().default(''),
   /** Comma-separated client hosts (CIDR) allowed to use public export. */
-  WEBLATE_API_ALLOWED_HOSTS: z.string().default(''),
+  WEBLATE_EXPORT_ALLOWED_HOSTS: z.string().default(''),
   WEBLATE_REVIEW_WORKFLOW: z
     .string()
     .default('true')
@@ -20,6 +20,23 @@ const schema = z.object({
     .string()
     .default('false')
     .transform((s) => s === 'true'),
+  /**
+   * Opt-in Swagger UI for the REST API. The value is matched case- and
+   * blank-insensitively: 'true' | 'on' | '1' enable the docs read-only;
+   * 'try' | 'with-try' | 'with_try' | 'swagger-with-try' | 'swagger_with_try'
+   * additionally enable the "Try it out" button.
+   */
+  SWAGGER_UI: z
+    .string()
+    .default('')
+    .transform((s) => {
+      const v = s.trim().toLowerCase();
+      const tryValues = ['try', 'with-try', 'with_try', 'swagger-with-try', 'swagger_with_try'];
+      return {
+        enabled: ['true', 'on', '1', ...tryValues].includes(v),
+        tryIt: tryValues.includes(v),
+      };
+    }),
   PORT: z.coerce.number().int().positive().default(4000),
 });
 
@@ -32,23 +49,27 @@ const env = parsed.data;
 
 /**
  * How upstream requests authenticate when not mocking:
- * - 'token': fixed WEBLATE_TOKEN (server-side).
+ * - 'token': fixed WEBLATE_API_KEY (server-side).
  * - 'session': users log in through the UI; their Weblate session cookie
  *   is stored server-side (no API token needed).
  */
 export const authMode: 'token' | 'session' =
-  env.WEBLATE_TOKEN !== '' ? 'token' : 'session';
+  env.WEBLATE_API_KEY !== '' ? 'token' : 'session';
 
 export const config = {
   weblateUrl: env.WEBLATE_URL,
-  weblateToken: env.WEBLATE_TOKEN,
-  /** Server-wide key enabling public (key-less) REST export. */
   weblateApiKey: env.WEBLATE_API_KEY,
+  /** Server-wide key enabling public (key-less) REST export. */
+  weblateExportApiKey: env.WEBLATE_EXPORT_API_KEY,
   /** Client hosts (CIDR) allowed to use public export. */
-  weblateApiAllowedHosts: env.WEBLATE_API_ALLOWED_HOSTS,
+  weblateExportAllowedHosts: env.WEBLATE_EXPORT_ALLOWED_HOSTS,
   reviewWorkflow: env.WEBLATE_REVIEW_WORKFLOW,
   /** 'mock' only when forced via MOCK_WEBLATE=true. */
   mode: (env.MOCK_WEBLATE ? 'mock' : 'live') as 'mock' | 'live',
+  /** Whether the Swagger UI docs page (/openapi/) and the spec are served. */
+  swaggerUi: env.SWAGGER_UI.enabled,
+  /** Whether the docs page's "Try it out" button is active (SWAGGER_UI=with-try). */
+  swaggerUiTryIt: env.SWAGGER_UI.tryIt,
   authMode,
   port: env.PORT,
   /** Units page size for Weblate requests (API max is 10000). */

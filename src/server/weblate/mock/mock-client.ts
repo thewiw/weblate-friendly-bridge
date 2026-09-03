@@ -105,6 +105,9 @@ export function buildMockData(now: Date = new Date()): MockData {
       allLangs.map((code) => ({
         language: { code, name: LANG_NAMES[code]! },
         is_source: code === SOURCE_LANG,
+        // Live Weblate reports the unit count per translation; export
+        // progress uses it as the denominator.
+        total: STRING_COUNT,
         units_list_url: `mock://translations/${key}/${code}/units/`,
         web_url: `mock://translate/${key}/${code}`,
       })),

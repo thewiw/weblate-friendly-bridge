@@ -15,6 +15,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { UnitState, WeblateUnit } from '../../shared/weblate-dto.js';
 import { UpstreamError } from '../http-errors.js';
+import { isNotFound, unknownComponentError } from '../component-lookup.js';
 import type { CacheRegistry } from '../cache/cache-registry.js';
 import type { WeblateApi } from '../weblate/client.js';
 
@@ -66,13 +67,26 @@ export interface DeleteOptions {
 
 const asArray = (v: string | string[]): string[] => (Array.isArray(v) ? v : [v]);
 
-/** Resolves a component's source language from its translation list. */
+/**
+ * Resolves a component's source language from its translation list,
+ * turning "not there" into a precise, actionable 404 (unknown project vs
+ * component, slug suggestion) instead of the raw upstream "Not found".
+ */
 const sourceLanguageOf = async (
   api: WeblateApi,
   project: string,
   component: string,
 ): Promise<string> => {
-  const translations = await api.listTranslations(api.translationsUrlFor(project, component));
+  let translations;
+  try {
+    translations = await api.listTranslations(api.translationsUrlFor(project, component));
+  } catch (err) {
+    if (!isNotFound(err)) throw err;
+    throw await unknownComponentError(api, project, component);
+  }
+  if (translations.length === 0) {
+    throw await unknownComponentError(api, project, component);
+  }
   return translations.find((t) => t.is_source)?.language.code ?? '';
 };
 
@@ -128,7 +142,10 @@ export async function createStrings(
 ): Promise<{ results: CreateResult[] }> {
   const sourceLanguage = await sourceLanguageOf(api, project, component);
   if (sourceLanguage === '') {
-    throw new UpstreamError(404, `Component ${component} has no source translation`);
+    throw new UpstreamError(
+      404,
+      `Component ${project}/${component} has no source translation`,
+    );
   }
 
   const results: CreateResult[] = [];
@@ -224,7 +241,8 @@ export async function patchTranslations(
       const unitId = await findUnitByContext(api, project, component, lang, context);
       if (unitId === null) {
         notFoundCount++;
-        errors[lang] = 'No translation exists for this language';
+        errors[lang] =
+          `No "${lang}" translation exists for this context yet (create it via a batch-create with "${lang}" in translations)`;
         continue;
       }
       await api.patchUnit(unitId, { target: effectiveTarget, state });
@@ -240,7 +258,11 @@ export async function patchTranslations(
     Object.keys(translations).length === 0 &&
     notFoundCount === Object.keys(changes).length
   ) {
-    throw new UpstreamError(404, `Unknown context: ${context}`);
+    throw new UpstreamError(
+      404,
+      `Unknown context: no string with context key "${context}" exists in ${project}/${component} ` +
+        `(strings are addressed by their context key, e.g. ID0001 — not by unit id)`,
+    );
   }
   return {
     context,
@@ -264,7 +286,10 @@ export async function deleteTranslation(
 ): Promise<Record<string, unknown>> {
   const sourceLanguage = await sourceLanguageOf(api, project, component);
   if (sourceLanguage === '') {
-    throw new UpstreamError(404, `Component ${component} has no source translation`);
+    throw new UpstreamError(
+      404,
+      `Component ${project}/${component} has no source translation`,
+    );
   }
 
   // Blank language counts as "no language" (matches the REST query param).
@@ -276,7 +301,10 @@ export async function deleteTranslation(
   if (language === undefined) {
     const unitId = await findUnitByContext(api, project, component, sourceLanguage, context);
     if (unitId === null) {
-      throw new UpstreamError(404, `Unknown context: ${context}`);
+      throw new UpstreamError(
+        404,
+        `Unknown context: no string with context key "${context}" exists in ${project}/${component}`,
+      );
     }
     await api.deleteUnit(unitId);
     touchCacheRemoval(registry, unitId);

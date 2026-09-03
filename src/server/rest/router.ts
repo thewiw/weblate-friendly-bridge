@@ -11,13 +11,15 @@ import { Router } from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { exportRequestSchema, type ExportRequest } from '../../shared/export.js';
-import { packageExport, runExport } from '../export/export-service.js';
+import { describeExportRequest, packageExport, runExport } from '../export/export-service.js';
 import { createItemsSchema, createStrings, deleteTranslation, patchTranslations, translationsPatchSchema } from './operations.js';
+import { openApiSpec } from './openapi.js';
 import { UpstreamError } from '../http-errors.js';
 import { config } from '../config.js';
 import type { CacheRegistry } from '../cache/cache-registry.js';
 import type { WeblateApi } from '../weblate/client.js';
 import { createApiKeyAuth } from './auth.js';
+import { logError, logInfo } from '../log.js';
 
 const createSchema = z.object({ items: createItemsSchema });
 const patchSchema = z.object({ translations: translationsPatchSchema });
@@ -31,15 +33,29 @@ export interface RestRouterOptions {
 export function createRestRouter(opts: RestRouterOptions) {
   const router = Router();
 
+  // The API description itself is not sensitive and must load without a
+  // key (the Swagger UI page at /openapi/ fetches it) — mounted before auth.
+  // Only served when SWAGGER_UI enables the docs (opt-in, see config.ts).
+  // The `x-try-it-out` extension tells the docs page whether the "Try it
+  // out" button is active (SWAGGER_UI=with-try) — the page is static, so
+  // this is the channel it reads the flag from.
+  router.get('/openapi.json', (_req, res) => {
+    if (!config.swaggerUi) {
+      res.status(404).json({ error: 'Not found (Swagger UI disabled — set SWAGGER_UI=true to enable)' });
+      return;
+    }
+    res.json({ ...openApiSpec, 'x-try-it-out': config.swaggerUiTryIt });
+  });
+
   const auth = createApiKeyAuth({
     weblateUrl: config.weblateUrl,
     mode: opts.mockApi.mode,
     mockApi: opts.mockApi,
     // Key-less /export requests may run under the server-wide key when
-    // both WEBLATE_API_KEY and WEBLATE_API_ALLOWED_HOSTS are set.
+    // both WEBLATE_EXPORT_API_KEY and WEBLATE_EXPORT_ALLOWED_HOSTS are set.
     publicExport: {
-      apiKey: config.weblateApiKey,
-      allowedHosts: config.weblateApiAllowedHosts,
+      apiKey: config.weblateExportApiKey,
+      allowedHosts: config.weblateExportAllowedHosts,
     },
   });
   router.use(auth);
@@ -51,9 +67,21 @@ export function createRestRouter(opts: RestRouterOptions) {
     return req.restAuth.api;
   };
 
-  const handleError = (err: unknown, res: Response, next: NextFunction): void => {
+  /**
+   * Client-facing error responses that bypass the app-level errorHandler
+   * (which logs) are logged here, so every REST error is visible in the
+   * console — same as timeouts/network failures are.
+   */
+  const logRestError = (req: Request, status: number, error: string): void => {
+
+    logError(`[rest] ${req.method} ${req.originalUrl} → ${status}: ${error}`);
+  };
+
+  const handleError = (err: unknown, req: Request, res: Response, next: NextFunction): void => {
     if (err instanceof z.ZodError) {
-      res.status(400).json({ error: err.issues[0]?.message ?? 'Bad request' });
+      const message = err.issues[0]?.message ?? 'Bad request';
+      logRestError(req, 400, message);
+      res.status(400).json({ error: message });
       return;
     }
     next(err);
@@ -84,12 +112,18 @@ export function createRestRouter(opts: RestRouterOptions) {
     try {
       params = exportRequestSchema.parse(req.body);
     } catch (err) {
-      handleError(err, res, next);
+      handleError(err, req, res, next);
       return;
     }
     try {
+      logInfo(`[rest] ${req.method} ${req.originalUrl} ← ${describeExportRequest(params)}`);
+      const started = Date.now();
       const files = await runExport(restApi(req), params);
       const payload = await packageExport(files, params.packaging);
+      logInfo(
+        `[rest] ${req.method} ${req.originalUrl} → ${files.length} file(s) ` +
+          `(${payload.kind}) in ${((Date.now() - started) / 1000).toFixed(1)}s`,
+      );
       if (payload.kind === 'zip') {
         res.setHeader('Content-Type', 'application/zip');
         res.setHeader('Content-Disposition', `attachment; filename="${payload.fileName}"`);
@@ -111,7 +145,7 @@ export function createRestRouter(opts: RestRouterOptions) {
       try {
         body = createSchema.parse(req.body);
       } catch (err) {
-        handleError(err, res, next);
+        handleError(err, req, res, next);
         return;
       }
 
@@ -125,7 +159,7 @@ export function createRestRouter(opts: RestRouterOptions) {
         );
         res.json(result);
       } catch (err) {
-        handleError(err, res, next);
+        handleError(err, req, res, next);
       }
     },
   );
@@ -139,7 +173,7 @@ export function createRestRouter(opts: RestRouterOptions) {
       try {
         body = patchSchema.parse(req.body);
       } catch (err) {
-        handleError(err, res, next);
+        handleError(err, req, res, next);
         return;
       }
 
@@ -154,7 +188,7 @@ export function createRestRouter(opts: RestRouterOptions) {
         );
         res.json(result);
       } catch (err) {
-        handleError(err, res, next);
+        handleError(err, req, res, next);
       }
     },
   );

@@ -8,7 +8,6 @@ import {
   runExport,
 } from '../../server/export/export-service.js';
 import { fileNameForLanguage } from '../../shared/export.js';
-import { UpstreamError } from '../../server/http-errors.js';
 
 const api = new MockWeblateClient();
 
@@ -20,9 +19,11 @@ const baseRequest = {
 } as const;
 
 describe('file naming', () => {
-  it('resolves both name patterns to .json files', () => {
-    expect(fileNameForLanguage('[language].json', 'de')).toBe('de.json');
-    expect(fileNameForLanguage('i18n.[language]', 'de')).toBe('i18n.de.json');
+  it('resolves the name patterns verbatim (no extension added)', () => {
+    expect(fileNameForLanguage('[language].json', 'en')).toBe('en.json');
+    expect(fileNameForLanguage('i18n.[language]', 'en')).toBe('i18n.en');
+    expect(fileNameForLanguage('i18n.[LANGUAGE]', 'en')).toBe('i18n.EN');
+    expect(fileNameForLanguage('i18n.[LANGUAGE]', 'pt-BR')).toBe('i18n.PT-BR');
   });
 });
 
@@ -142,12 +143,21 @@ describe('runExport (mock client)', () => {
   });
 
   it('rejects unknown components and unmatched language filters', async () => {
+    // Unknown slug: the error lists the available slugs.
     await expect(
       runExport(api, {
         ...baseRequest,
         scope: [{ project: 'friendly-suite', component: 'nope' }],
       }),
-    ).rejects.toThrow(/Unknown component/);
+    ).rejects.toThrow(/Unknown component: friendly-suite\/nope\. Available components/);
+
+    // A display-name look-up suggests the actual slug (dots are not slugs).
+    await expect(
+      runExport(api, {
+        ...baseRequest,
+        scope: [{ project: 'friendly-suite', component: 'Web.UI' }],
+      }),
+    ).rejects.toThrow(/did you mean the slug "web-ui"/);
 
     await expect(
       runExport(api, {
@@ -155,7 +165,7 @@ describe('runExport (mock client)', () => {
         scope: [{ project: 'friendly-suite', component: 'web-ui' }],
         languages: ['xx'],
       }),
-    ).rejects.toThrow(UpstreamError);
+    ).rejects.toThrow(/No matching languages to export — requested \[xx\], available/);
   });
 });
 

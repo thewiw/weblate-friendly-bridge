@@ -9,7 +9,8 @@ import pLimit from 'p-limit';
 import { z } from 'zod';
 import { ROW_FILTERS, SORT_KEYS, type Cell } from '../shared/rows.js';
 import { exportRequestSchema, type ExportRequest } from '../shared/export.js';
-import { listComponentLanguages, packageExport, runExport } from './export/export-service.js';
+import { describeExportRequest, listComponentLanguages } from './export/export-service.js';
+import { ExportJobStore } from './export/export-jobs.js';
 import { UpstreamError } from './http-errors.js';
 import { config } from './config.js';
 import type { CacheRegistry } from './cache/cache-registry.js';
@@ -22,6 +23,7 @@ import {
   weblateLogin,
   weblateLoginTotp,
 } from './auth/sessions.js';
+import { logError, logInfo } from './log.js';
 
 const UI_SESSION_COOKIE = 'wfu_sid';
 
@@ -96,7 +98,7 @@ export interface AuthHooks {
 }
 
 export interface RouterOptions {
-  /** Present in session-auth mode (no WEBLATE_TOKEN configured). */
+  /** Present in session-auth mode (no WEBLATE_API_KEY configured). */
   auth?: {
     store: WeblateSessionStore;
     /** Base URL of the Weblate instance (login target). */
@@ -282,7 +284,13 @@ export function createRouter(
     }
   });
 
-  router.post('/export', async (req, res, next) => {
+  // Export runs as a background job: the POST returns a jobId at once and
+  // the client polls /export-jobs/:jobId for progress, then downloads the
+  // payload from /export-jobs/:jobId/result. (The REST/MCP export under
+  // /api/rest/v1 stays synchronous — script consumers cannot poll a job.)
+  const exportJobs = new ExportJobStore();
+
+  router.post('/export', (req, res, next) => {
     let params: ExportRequest;
     try {
       params = exportRequestSchema.parse(req.body);
@@ -294,18 +302,50 @@ export function createRouter(
       next(err);
       return;
     }
-    try {
-      const files = await runExport(forRequest(req), params);
-      const payload = await packageExport(files, params.packaging);
-      if (payload.kind === 'zip') {
-        res.setHeader('Content-Type', 'application/zip');
-        res.setHeader('Content-Disposition', `attachment; filename="${payload.fileName}"`);
-        res.send(payload.data);
-      } else {
-        res.json({ files: payload.files });
-      }
-    } catch (err) {
-      next(err);
+    // The per-request client is captured before the response is sent —
+    // the job reads with the requesting user's credentials (session or key).
+    const jobId = exportJobs.create();
+    logInfo(`[export] job ${jobId} ← ${describeExportRequest(params)}`);
+    exportJobs.start(jobId, forRequest(req), params);
+    res.json({ jobId });
+  });
+
+  router.get('/export-jobs/:jobId', (req, res) => {
+    const job = exportJobs.get(req.params.jobId!);
+    if (job === undefined) {
+      res.status(404).json({ error: 'Unknown export job' });
+      return;
+    }
+    res.json({
+      status: job.status,
+      loaded: job.loaded,
+      total: job.total,
+      current: job.current,
+      ...(job.error !== null ? { error: job.error } : {}),
+    });
+  });
+
+  router.get('/export-jobs/:jobId/result', (req, res) => {
+    const job = exportJobs.get(req.params.jobId!);
+    if (job === undefined) {
+      res.status(404).json({ error: 'Unknown export job' });
+      return;
+    }
+    if (job.status === 'error') {
+      res.status(409).json({ error: job.error ?? 'Export failed' });
+      return;
+    }
+    if (job.status !== 'done' || job.result === null) {
+      res.status(409).json({ error: 'Export not finished yet' });
+      return;
+    }
+    const payload = job.result;
+    if (payload.kind === 'zip') {
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename="${payload.fileName}"`);
+      res.send(payload.data);
+    } else {
+      res.json({ files: payload.files });
     }
   });
 
@@ -583,8 +623,7 @@ export function errorHandler(
   _next: NextFunction,
 ): void {
   // Log everything unexpected so 500s are diagnosable from the console.
-  // eslint-disable-next-line no-console
-  console.error(
+  logError(
     `[${req.method} ${req.originalUrl}]`,
     err instanceof Error ? `${err.message}\n${err.stack}` : err,
   );
@@ -592,6 +631,15 @@ export function errorHandler(
     res
       .status(err.status)
       .json({ error: err.message, retryAfter: err.retryAfterSeconds });
+    return;
+  }
+  // body-parser failures (express.json) carry an HTTP status themselves —
+  // e.g. a malformed JSON body answers 400 with the parser's position, not
+  // a 500 "Internal error".
+  const status = (err as { status?: unknown }).status;
+  if (typeof status === 'number' && status >= 400 && status < 500) {
+    const message = err instanceof Error ? err.message : 'Malformed request';
+    res.status(status).json({ error: `Malformed request body: ${message}` });
     return;
   }
   res.status(500).json({ error: 'Internal error' });

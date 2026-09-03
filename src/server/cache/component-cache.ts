@@ -27,6 +27,7 @@ import {
   unitToCell,
   type RowMap,
 } from './row-model.js';
+import { logInfo } from '../log.js';
 
 export type CacheStatus = 'empty' | 'loading' | 'ready' | 'error';
 
@@ -241,7 +242,7 @@ export class ComponentCache {
                 before.hasComment !== after.hasComment ||
                 before.hasSuggestion !== after.hasSuggestion)
             ) {
-              console.log(
+              logInfo(
                 `[wfu] source-edit refresh: unit #${id} (${lang}) flags ` +
                   `check=${before.hasFailingCheck}->${after.hasFailingCheck}, ` +
                   `comment=${before.hasComment}->${after.hasComment}, ` +

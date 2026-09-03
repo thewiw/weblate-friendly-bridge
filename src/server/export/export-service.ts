@@ -10,10 +10,11 @@
  * Plural targets export as suffixed keys `key_0`, `key_1`, … (lossless).
  */
 import JSZip from 'jszip';
-import type { ExportRequest, ExportFile } from '../../shared/export.js';
+import type { ExportProgress, ExportRequest, ExportFile } from '../../shared/export.js';
 import { fileNameForLanguage } from '../../shared/export.js';
 import type { WeblateApi } from '../weblate/client.js';
 import { UpstreamError } from '../http-errors.js';
+import { isNotFound, unknownComponentError } from '../component-lookup.js';
 import { buildFileContent, type ExportEntry } from './formats.js';
 
 /** A finished export file: archive path + serialized content. */
@@ -26,6 +27,13 @@ export interface ExportResultFile {
 export type ExportPayload =
   | { kind: 'zip'; fileName: string; data: Buffer }
   | { kind: 'json'; files: ExportFile[] };
+
+/** One-line description of an export request, for request logging. */
+export function describeExportRequest(params: ExportRequest): string {
+  const scope = params.scope.map((s) => `${s.project}/${s.component}`).join(', ');
+  const languages = params.languages?.length ? params.languages.join(', ') : 'all';
+  return `scope: ${scope}; languages: ${languages}; format: ${params.format}; grouping: ${params.grouping}; packaging: ${params.packaging}`;
+}
 
 /** Languages of one component (source first) — used by the UI dialog. */
 export async function listComponentLanguages(
@@ -45,17 +53,19 @@ export async function listComponentLanguages(
 /**
  * Units of one translation, keyed by content_hash — the cross-language
  * identity of a string (contexts are not unique: key-less components have
- * many units with context '').
+ * many units with context ''). `onUnit` fires per fetched unit (progress).
  */
 const unitsByHash = async (
   api: WeblateApi,
   project: string,
   component: string,
   language: string,
+  onUnit?: () => void,
 ): Promise<Map<number, { context: string; target: string[] }>> => {
   const map = new Map<number, { context: string; target: string[] }>();
   for await (const unit of api.listUnits(api.unitsUrlFor(project, component, language))) {
     map.set(unit.content_hash, { context: unit.context, target: unit.target });
+    onUnit?.();
   }
   return map;
 };
@@ -63,11 +73,14 @@ const unitsByHash = async (
 /**
  * Runs the export and returns the file set (grouping + file-name rules
  * applied). Throws UpstreamError (404) for unknown components or when no
- * requested language matches.
+ * requested language matches. `onProgress` reports units fetched vs
+ * expected per (component, language); `total` is 0 whenever Weblate did
+ * not provide unit counts for every exported translation (indeterminate).
  */
 export async function runExport(
   api: WeblateApi,
   params: ExportRequest,
+  onProgress?: (p: ExportProgress) => void,
 ): Promise<ExportResultFile[]> {
   // Deduplicate scope pairs (same component twice = one export).
   const seen = new Set<string>();
@@ -81,6 +94,10 @@ export async function runExport(
   const requestedLangs = params.languages?.filter((l) => l.trim() !== '') ?? [];
   const mergedEntries = new Map<string, Map<string, ExportEntry>>(); // language -> key -> entry
   const resultFiles: ExportResultFile[] = [];
+  const progress: ExportProgress = { loaded: 0, total: 0, current: '' };
+  let totalsKnown = true;
+  /** Available language codes per scope pair — for the no-match error. */
+  const availableLangs = new Map<string, string[]>();
 
   for (const { project, component } of scope) {
     let translations;
@@ -88,31 +105,55 @@ export async function runExport(
       translations = await api.listTranslations(api.translationsUrlFor(project, component));
     } catch (err) {
       // Unknown components surface as 404s regardless of how the client
-      // reports them (live maps upstream 404s differently than the mock).
-      if (err instanceof UpstreamError) throw err;
-      throw new UpstreamError(404, `Unknown component: ${project}/${component}`);
+      // reports them (live maps upstream 404s differently than the mock);
+      // anything else (network, 5xx…) must not be masked as 404.
+      if (err instanceof UpstreamError && !isNotFound(err)) throw err;
+      throw await unknownComponentError(api, project, component);
     }
     if (translations.length === 0) {
-      throw new UpstreamError(404, `Unknown component: ${project}/${component}`);
+      throw await unknownComponentError(api, project, component);
     }
     const sourceLanguage = translations.find((t) => t.is_source)?.language.code ?? '';
     const available = new Set(translations.map((t) => t.language.code));
+    availableLangs.set(`${project}/${component}`, [...available].sort());
     const languages =
       requestedLangs.length > 0
         ? requestedLangs.filter((l) => available.has(l))
         : [...available];
 
+    const unitTotal = (code: string): number =>
+      translations.find((t) => t.language.code === code)?.total ?? 0;
+    const onUnit = (): void => {
+      progress.loaded++;
+      onProgress?.({ ...progress });
+    };
+
     // Key set + source values from the source-language units.
-    const sourceUnits =
-      sourceLanguage !== ''
-        ? await unitsByHash(api, project, component, sourceLanguage)
-        : new Map<number, { context: string; target: string[] }>();
+    let sourceUnits = new Map<number, { context: string; target: string[] }>();
+    if (sourceLanguage !== '') {
+      const total = unitTotal(sourceLanguage);
+      if (total > 0) progress.total += total;
+      else totalsKnown = false;
+      progress.current = `${project}/${component}/${sourceLanguage}`;
+      onProgress?.({ ...progress });
+      sourceUnits = await unitsByHash(api, project, component, sourceLanguage, onUnit);
+    }
+    if (!totalsKnown) progress.total = 0;
 
     for (const language of languages) {
-      const targets =
-        language === sourceLanguage
-          ? sourceUnits
-          : await unitsByHash(api, project, component, language);
+      // The source language's units are already fetched above (they carry
+      // the key set) — reuse them instead of re-reading the translation.
+      let targets = sourceUnits;
+      if (language !== sourceLanguage) {
+        const total = unitTotal(language);
+        if (total > 0) progress.total += total;
+        else totalsKnown = false;
+        if (!totalsKnown) progress.total = 0;
+
+        progress.current = `${project}/${component}/${language}`;
+        onProgress?.({ ...progress });
+        targets = await unitsByHash(api, project, component, language, onUnit);
+      }
 
       const entries: ExportEntry[] = [];
       for (const [hash, sourceUnit] of sourceUnits) {
@@ -155,7 +196,14 @@ export async function runExport(
   }
 
   if (resultFiles.length === 0) {
-    throw new UpstreamError(404, 'No matching languages to export');
+    const availability = [...availableLangs.entries()]
+      .map(([pair, langs]) => `${pair}: ${langs.join(', ')}`)
+      .join('; ');
+    throw new UpstreamError(
+      404,
+      `No matching languages to export — requested [${requestedLangs.join(', ')}], ` +
+        `available — ${availability}.`,
+    );
   }
   return resultFiles;
 }

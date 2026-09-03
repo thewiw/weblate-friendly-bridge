@@ -27,6 +27,8 @@ export interface WeblateComponent {
 export interface WeblateTranslation {
   language: { code: string; name: string };
   is_source: boolean;
+  /** Total number of units in this translation (live Weblate; absent in mock-less paths). */
+  total?: number;
   /** URL of the units listing for this translation. */
   units_list_url: string;
   web_url: string;

@@ -14,7 +14,7 @@ import { z } from 'zod';
 export const EXPORT_FORMATS = ['i18next', 'arb'] as const;
 export type ExportFormat = (typeof EXPORT_FORMATS)[number];
 
-export const EXPORT_FILE_NAMES = ['[language].json', 'i18n.[language]'] as const;
+export const EXPORT_FILE_NAMES = ['[language].json', 'i18n.[language]', 'i18n.[LANGUAGE]'] as const;
 export type ExportFileName = (typeof EXPORT_FILE_NAMES)[number];
 
 export const EXPORT_GROUPINGS = ['per-component', 'merged'] as const;
@@ -51,6 +51,25 @@ export interface ExportResponse {
   files: ExportFile[];
 }
 
+/**
+ * Progress of a background export job (session UI route): the server runs
+ * the export asynchronously, the client polls for this state and fetches
+ * the result once status is 'done'.
+ */
+export interface ExportProgress {
+  /** Units fetched so far. */
+  loaded: number;
+  /** Units expected (0 = unknown — the UI shows an indeterminate progress). */
+  total: number;
+  /** What is being exported right now, e.g. "project/component/de". */
+  current: string;
+}
+
+export interface ExportJobState extends ExportProgress {
+  status: 'running' | 'done' | 'error';
+  error: string | null;
+}
+
 export const exportRequestSchema = z.object({
   scope: z
     .array(
@@ -68,8 +87,10 @@ export const exportRequestSchema = z.object({
   packaging: z.enum(EXPORT_PACKAGINGS),
 });
 
-/** Replaces `[language]` with the language code (e.g. `de.json`, `i18n.de.json`). */
+/**
+ * Replaces `[language]` with the language code (e.g. `en.json`, `i18n.en`)
+ * and `[LANGUAGE]` with the uppercased code (e.g. `i18n.EN`).
+ */
 export function fileNameForLanguage(pattern: ExportFileName, language: string): string {
-  const name = pattern.replace('[language]', language);
-  return name.endsWith('.json') ? name : `${name}.json`;
+  return pattern.replace('[LANGUAGE]', language.toUpperCase()).replace('[language]', language);
 }

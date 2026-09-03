@@ -7,11 +7,12 @@ import { createWeblateApi } from './weblate/client.js';
 import { WeblateSessionStore } from './auth/sessions.js';
 import { createApp } from './app.js';
 import { reportPublicExportStatus } from './rest/public-export.js';
+import { logInfo } from './log.js';
 
 const api = createWeblateApi();
 const registry = new CacheRegistry(api);
 
-// Session mode (no WEBLATE_TOKEN): users authenticate through the login
+// Session mode (no WEBLATE_API_KEY): users authenticate through the login
 // view; each browser session gets its own server-side Weblate session.
 const opts =
   config.mode === 'live' && config.authMode === 'session'
@@ -30,8 +31,8 @@ const app = createApp(api, registry, opts);
 void reportPublicExportStatus({
   mode: config.mode,
   weblateUrl: config.weblateUrl,
-  apiKey: config.weblateApiKey,
-  allowedHosts: config.weblateApiAllowedHosts,
+  apiKey: config.weblateExportApiKey,
+  allowedHosts: config.weblateExportAllowedHosts,
 });
 
 // Production: serve the built frontend from the same port, with an SPA
@@ -40,6 +41,14 @@ void reportPublicExportStatus({
 // project root, in dev and production alike).
 const clientDir = path.resolve(process.cwd(), 'dist/client');
 if (existsSync(clientDir)) {
+  // The docs page is static in dist/client (public/openapi/) — hide it
+  // (and its assets) when SWAGGER_UI is not enabled. Registered before
+  // express.static so it takes precedence.
+  if (!config.swaggerUi) {
+    app.use('/openapi', (_req, res) => {
+      res.status(404).json({ error: 'Swagger UI disabled — set SWAGGER_UI=true to enable' });
+    });
+  }
   app.use(express.static(clientDir));
   app.get(/^(?!\/api).*/, (_req, res) => {
     res.sendFile(path.join(clientDir, 'index.html'));
@@ -47,8 +56,8 @@ if (existsSync(clientDir)) {
 }
 
 app.listen(config.port, () => {
-  // eslint-disable-next-line no-console
-  console.log(
+
+  logInfo(
     `weblate-friendly-bridge server on :${config.port} (mode: ${config.mode}, auth: ${config.authMode}, weblate: ${config.weblateUrl})`,
   );
 });

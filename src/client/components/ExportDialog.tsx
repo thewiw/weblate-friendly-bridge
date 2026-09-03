@@ -21,8 +21,9 @@ import type {
   ExportScopeItem,
 } from '../../shared/export.js';
 import type { WeblateProject } from '../../shared/weblate-dto.js';
+import type { ExportProgress } from '../../shared/export.js';
 import { api } from '../api/http.js';
-import { useComponents, exportTranslations } from '../api/queries.js';
+import { useComponents, useExport } from '../api/queries.js';
 import type { ComponentLanguage } from '../api/queries.js';
 import { Spinner } from './ui.js';
 
@@ -85,6 +86,27 @@ function ProjectScopeRow({
 function languageSummary(langSet: Set<string>, choices: ComponentLanguage[]): string {
   if (langSet.size === 0 || langSet.size === choices.length) return 'all languages';
   return `${langSet.size} of ${choices.length}`;
+}
+
+/**
+ * Export progress while the server job runs (same styling as the grid's
+ * ProgressBanner). Without unit totals from Weblate the bar stays
+ * indeterminate and only the fetched count is shown.
+ */
+function ExportProgressBar({ progress }: { progress: ExportProgress }) {
+  const { loaded, total, current } = progress;
+  const pct = total > 0 ? Math.round((loaded / total) * 100) : 0;
+  return (
+    <div className="flex items-center gap-3 text-sm text-sky-700">
+      <span className="truncate">
+        Exporting {current || '…'}{' '}
+        {total > 0 ? `— ${loaded}/${total} strings (${pct}%)` : `— ${loaded} strings`}
+      </span>
+      <div className="h-1.5 flex-1 rounded bg-sky-100 overflow-hidden">
+        <div className="h-full bg-sky-500 transition-all" style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
 }
 
 export function ExportDialog({ projects, scope, languages, onClose }: ExportDialogProps) {
@@ -168,10 +190,13 @@ export function ExportDialog({ projects, scope, languages, onClose }: ExportDial
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<ExportProgress | null>(null);
+  const exportJob = useExport();
 
   const handleExport = async (): Promise<void> => {
     setBusy(true);
     setError(null);
+    setProgress(null);
     const request: ExportRequest = {
       scope: resolvedScope,
       // Empty selection = all languages (per the export contract).
@@ -182,12 +207,16 @@ export function ExportDialog({ projects, scope, languages, onClose }: ExportDial
       packaging,
     };
     try {
-      await exportTranslations(request);
+      await exportJob.mutateAsync({
+        request,
+        onProgress: setProgress,
+      });
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Export failed');
     } finally {
       setBusy(false);
+      setProgress(null);
     }
   };
 
@@ -202,7 +231,7 @@ export function ExportDialog({ projects, scope, languages, onClose }: ExportDial
       >
         <h2 className="font-semibold text-slate-800">Export translations</h2>
         <p className="text-xs text-slate-500">
-          One file per language (e.g. {fileNameForLanguage(fileName, 'de')}) — untranslated
+          One file per language (e.g. {fileNameForLanguage(fileName, 'en')}) — untranslated
           strings export as empty values.
         </p>
 
@@ -252,7 +281,7 @@ export function ExportDialog({ projects, scope, languages, onClose }: ExportDial
             >
               {EXPORT_FILE_NAMES.map((n) => (
                 <option key={n} value={n}>
-                  {fileNameForLanguage(n, 'de')}
+                  {fileNameForLanguage(n, 'en')}
                 </option>
               ))}
             </select>
@@ -337,6 +366,9 @@ export function ExportDialog({ projects, scope, languages, onClose }: ExportDial
           )}
         </div>
 
+        {busy && progress !== null && (
+          <ExportProgressBar progress={progress} />
+        )}
         {error !== null && <div className="text-sm text-red-600">{error}</div>}
 
         <div className="flex justify-end gap-2">
@@ -353,7 +385,7 @@ export function ExportDialog({ projects, scope, languages, onClose }: ExportDial
             disabled={busy || resolvedScope.length === 0}
             onClick={() => void handleExport()}
           >
-            {busy && <Spinner label="" />}
+            {busy && progress === null && <Spinner label="" />}
             Export
           </button>
         </div>
