@@ -2,7 +2,7 @@
 # The image packages only the dist/ output — the server bundle is
 # self-contained (esbuild) and serves dist/client itself.
 services:
-  friendly-ui:
+  weblate-friendly-bridge:
     build:
       # Context is the repo root (where dist/ lives); the Dockerfile
       # is in this docker/ directory. COPY paths in the Dockerfile are
@@ -20,7 +20,7 @@ services:
       #   - Weblate on the host's localhost -> http://host.docker.internal:PORT
       #     (the extra_hosts below makes that name resolve)
       #   - Weblate elsewhere on the LAN    -> http://<lan-ip>:PORT (default)
-      WEBLATE_URL: ${WEBLATE_URL:-http://192.168.56.220:2080}
+      WEBLATE_URL: ${WEBLATE_URL:-}
       # Omit to run in session mode (users sign in via the login view).
       WEBLATE_API_KEY: ${WEBLATE_API_KEY:-}
       WEBLATE_REVIEW_WORKFLOW: ${WEBLATE_REVIEW_WORKFLOW:-true}
