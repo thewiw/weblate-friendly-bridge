@@ -122,9 +122,13 @@ export function createKeyValidator(
 export function createApiKeyAuth(opts: RestAuthOptions) {
   const validate = createKeyValidator(opts.weblateUrl);
 
-  /** Logs every client-facing rejection (they bypass the errorHandler). */
+  /** Logs every client-facing rejection (they bypass the errorHandler),
+   *  including the client IP the request originated from. */
   const reject = (req: Request, res: Response, status: number, error: string, detail?: string): void => {
-    logError(`[rest] ${req.method} ${req.originalUrl} → ${status}: ${error}${detail !== undefined ? ` (${detail})` : ''}`);
+    logError(
+      `[rest] ${req.method} ${req.originalUrl} → ${status}: ${error}` +
+        `${detail !== undefined ? ` (${detail})` : ''} from ${req.ip ?? '(unknown IP)'}`,
+    );
     res.status(status).json({ error });
   };
 

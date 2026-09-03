@@ -42,11 +42,11 @@ void reportPublicExportStatus({
 const clientDir = path.resolve(process.cwd(), 'dist/client');
 if (existsSync(clientDir)) {
   // The docs page is static in dist/client (public/openapi/) — hide it
-  // (and its assets) when SWAGGER_UI is not enabled. Registered before
+  // (and its assets) when OPENAPI_UI is not enabled. Registered before
   // express.static so it takes precedence.
-  if (!config.swaggerUi) {
+  if (!config.openapiUi) {
     app.use('/openapi', (_req, res) => {
-      res.status(404).json({ error: 'Swagger UI disabled — set SWAGGER_UI=true to enable' });
+      res.status(404).json({ error: 'Swagger UI disabled — set OPENAPI_UI=true to enable' });
     });
   }
   app.use(express.static(clientDir));

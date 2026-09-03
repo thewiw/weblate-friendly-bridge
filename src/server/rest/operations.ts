@@ -98,11 +98,14 @@ const findUnitByContext = async (
   language: string,
   context: string,
 ): Promise<number | null> => {
+  // Weblate's context: search is a SUBSTRING match ("context:truc" also
+  // finds "…INSTRUCTION…") — verify the context is exactly the requested
+  // one before trusting a hit.
   for await (const unit of api.listUnits(
     api.unitsUrlFor(project, component, language),
     `context:${context}`,
   )) {
-    return unit.id;
+    if (unit.context === context) return unit.id;
   }
   return null;
 };
@@ -170,6 +173,11 @@ export async function createStrings(
 
       // 2. Each provided translation: find the propagated sibling unit
       //    and set it to "Needs editing"; create it when not visible.
+      //    RACE: Weblate propagates the new string to every translation
+      //    immediately, but its search index (q=context:…) can lag — the
+      //    lookup then misses the propagated unit and the fallback create
+      //    collides with it (upstream 404). On a failed create, re-check
+      //    the lookup before giving up.
       const translations: Record<string, { unitId: number; state: number }> = {};
       for (const [lang, text] of Object.entries(item.translations ?? {})) {
         try {
@@ -184,13 +192,21 @@ export async function createStrings(
           if (unitId !== null) {
             await api.patchUnit(unitId, { target, state: NEEDS_EDITING });
           } else {
-            const fallback = await api.createUnit(api.unitsUrlFor(project, component, lang), {
-              key: context,
-              source,
-              target,
-              state: NEEDS_EDITING,
-            });
-            unitId = fallback.id;
+            try {
+              const fallback = await api.createUnit(api.unitsUrlFor(project, component, lang), {
+                key: context,
+                source,
+                target,
+                state: NEEDS_EDITING,
+              });
+              unitId = fallback.id;
+            } catch (err) {
+              // The context exists after all (propagation outran the search
+              // index) — patch the propagated unit instead of failing.
+              unitId = await findUnitByContext(api, project, component, lang, context);
+              if (unitId === null) throw err;
+              await api.patchUnit(unitId, { target, state: NEEDS_EDITING });
+            }
           }
           translations[lang] = { unitId, state: NEEDS_EDITING };
         } catch (err) {
@@ -198,7 +214,9 @@ export async function createStrings(
             ok: false,
             context,
             language: lang,
-            error: err instanceof Error ? err.message : String(err),
+            error:
+              `Weblate rejected the "${lang}" translation for context "${context}": ` +
+              (err instanceof Error ? err.message : String(err)),
           });
         }
       }

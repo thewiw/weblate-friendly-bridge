@@ -33,19 +33,19 @@ async function getRowsUntilComplete(
 
 const BASE = '/api/rest/v1/projects/friendly-suite/components/web-ui';
 
-// These tests assume the default SWAGGER_UI state; another test file sets
+// These tests assume the default OPENAPI_UI state; another test file sets
 // the variable in the same worker process (env is shared across files).
 // vi.hoisted runs before the static imports, so config.ts (which evaluates
 // the env at import time) sees the pinned value.
 vi.hoisted(() => {
-  process.env.SWAGGER_UI = '';
+  process.env.OPENAPI_UI = '';
 });
 
 describe('REST API authentication', () => {
-  it('hides the OpenAPI spec unless SWAGGER_UI is enabled (default off)', async () => {
+  it('hides the OpenAPI spec unless OPENAPI_UI is enabled (default off)', async () => {
     const { app } = makeApp();
     const res = await request(app).get('/api/rest/v1/openapi.json').expect(404);
-    expect((res.body as { error: string }).error).toContain('SWAGGER_UI');
+    expect((res.body as { error: string }).error).toContain('OPENAPI_UI');
   });
 
   it('rejects requests without a key', async () => {

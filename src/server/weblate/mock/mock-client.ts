@@ -461,7 +461,10 @@ function filterByQ(units: WeblateUnit[], q: string): WeblateUnit[] {
   const context = /^context:(.+)$/.exec(trimmed);
   if (context !== null) {
     const ctx = context[1]!.replace(/^"(.*)"$/, '$1');
-    return units.filter((u) => u.context === ctx);
+    // Live Weblate matches substrings, case-insensitively ("context:truc"
+    // also finds "…INSTRUCTION…") — callers must exact-check the hit.
+    const needle = ctx.toLowerCase();
+    return units.filter((u) => u.context.toLowerCase().includes(needle));
   }
   return units;
 }

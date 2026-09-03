@@ -35,16 +35,16 @@ export function createRestRouter(opts: RestRouterOptions) {
 
   // The API description itself is not sensitive and must load without a
   // key (the Swagger UI page at /openapi/ fetches it) — mounted before auth.
-  // Only served when SWAGGER_UI enables the docs (opt-in, see config.ts).
+  // Only served when OPENAPI_UI enables the docs (opt-in, see config.ts).
   // The `x-try-it-out` extension tells the docs page whether the "Try it
-  // out" button is active (SWAGGER_UI=with-try) — the page is static, so
+  // out" button is active (OPENAPI_UI=with-try) — the page is static, so
   // this is the channel it reads the flag from.
   router.get('/openapi.json', (_req, res) => {
-    if (!config.swaggerUi) {
-      res.status(404).json({ error: 'Not found (Swagger UI disabled — set SWAGGER_UI=true to enable)' });
+    if (!config.openapiUi) {
+      res.status(404).json({ error: 'Not found (Swagger UI disabled — set OPENAPI_UI=true to enable)' });
       return;
     }
-    res.json({ ...openApiSpec, 'x-try-it-out': config.swaggerUiTryIt });
+    res.json({ ...openApiSpec, 'x-try-it-out': config.openapiTryIt });
   });
 
   const auth = createApiKeyAuth({

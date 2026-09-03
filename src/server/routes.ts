@@ -631,6 +631,10 @@ export function errorHandler(
     res
       .status(err.status)
       .json({ error: err.message, retryAfter: err.retryAfterSeconds });
+    // Auth failures get the origin IP in the log line.
+    if (err.status === 401 || err.status === 403) {
+      logError(`[${req.method} ${req.originalUrl}] → ${err.status} from ${req.ip ?? '(unknown IP)'}`);
+    }
     return;
   }
   // body-parser failures (express.json) carry an HTTP status themselves —

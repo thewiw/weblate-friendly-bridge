@@ -26,7 +26,7 @@ const schema = z.object({
    * 'try' | 'with-try' | 'with_try' | 'swagger-with-try' | 'swagger_with_try'
    * additionally enable the "Try it out" button.
    */
-  SWAGGER_UI: z
+  OPENAPI_UI: z
     .string()
     .default('')
     .transform((s) => {
@@ -66,10 +66,10 @@ export const config = {
   reviewWorkflow: env.WEBLATE_REVIEW_WORKFLOW,
   /** 'mock' only when forced via MOCK_WEBLATE=true. */
   mode: (env.MOCK_WEBLATE ? 'mock' : 'live') as 'mock' | 'live',
-  /** Whether the Swagger UI docs page (/openapi/) and the spec are served. */
-  swaggerUi: env.SWAGGER_UI.enabled,
-  /** Whether the docs page's "Try it out" button is active (SWAGGER_UI=with-try). */
-  swaggerUiTryIt: env.SWAGGER_UI.tryIt,
+  /** Whether the OpenAPI docs page (/openapi/) and the spec are served. */
+  openapiUi: env.OPENAPI_UI.enabled,
+  /** Whether the docs page's "Try it out" button is active (OPENAPI_UI=try|with-try|…). */
+  openapiTryIt: env.OPENAPI_UI.tryIt,
   authMode,
   port: env.PORT,
   /** Units page size for Weblate requests (API max is 10000). */

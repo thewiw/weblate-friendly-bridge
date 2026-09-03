@@ -39,7 +39,7 @@ everything works offline.
 | `WEBLATE_EXPORT_API_KEY` | Optional server-wide Weblate API key. Together with `WEBLATE_EXPORT_ALLOWED_HOSTS` it enables public (key-less) export; also used in mock mode (any key accepted there anyway) |
 | `WEBLATE_EXPORT_ALLOWED_HOSTS` | Comma-separated client hosts in CIDR format (e.g. `192.168.56.0/24,::1`) allowed to export without an API key |
 | `PORT` | Backend port (default 4000) |
-| `SWAGGER_UI` | Opt-in: serves the REST API docs page (`/openapi/`) and the OpenAPI spec (`/api/rest/v1/openapi.json`). Values are matched case- and blank-insensitively: `true`, `on` or `1` enable read-only docs; `try`, `with-try`, `with_try`, `swagger-with-try` or `swagger_with_try` also enable the "Try it out" button. Anything else (or unset) answers 404 |
+| `OPENAPI_UI` | Opt-in: serves the REST API docs page (`/openapi/`) and the OpenAPI spec (`/api/rest/v1/openapi.json`). Values are matched case- and blank-insensitively: `true`, `on` or `1` enable read-only docs; `try`, `with-try`, `with_try`, `swagger-with-try` or `swagger_with_try` also enable the "Try it out" button. Anything else (or unset) answers 404 |
 
 ## Development
 
@@ -76,7 +76,7 @@ The REST API is documented as an OpenAPI 3 spec with a browsable Swagger UI:
 - **Docs page**: `http://<host>:<port>/openapi/`
 - **Raw spec**: `http://<host>:<port>/api/rest/v1/openapi.json`
 
-The docs are **opt-in**: set `SWAGGER_UI` to `true`, `on` or `1` (read-only
+The docs are **opt-in**: set `OPENAPI_UI` to `true`, `on` or `1` (read-only
 docs), or `try` / `with-try` / `with_try` / `swagger-with-try` /
 `swagger_with_try` to also enable the "Try it out" button
 (values are case- and blank-insensitive; anything else, or unset, answers 404
