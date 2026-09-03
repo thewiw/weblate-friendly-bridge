@@ -20,7 +20,7 @@ npm start            # node dist/server/index.cjs — serves API + built fronten
 
 ## Docker deployment
 
-Docker files live in `docker/` (`Dockerfile` + `docker-compose.yaml`). The image is runtime-only: it packages just `dist/` (the esbuild server bundle is self-contained, no `node_modules` needed) and the container runs `node dist/server/index.cjs`, which serves both the API and the built frontend on :4000. Build context is the repo root (`dist/` must exist first — run `npm run build` before building the image).
+Docker files live in `docker/` (`Dockerfile` + `docker-compose.yaml`). The Dockerfile is **multi-stage**: a node:22-alpine builder stage runs `npm ci && npm run build` inside Docker (so a plain clone builds with only Docker installed — no host Node/npm), and the runtime image packages just `dist/` (the esbuild server bundle is self-contained, no `node_modules` needed); the container runs `node dist/server/index.cjs`, which serves both the API and the built frontend on :4000. Build context is the repo root (see `.dockerignore` — `node_modules`/`dist`/`.git`/`.env` stay out).
 
 ```bash
 npm run build

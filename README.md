@@ -140,14 +140,16 @@ language + `all=true`.
 
 ## Docker deployment
 
-The Docker files live in `docker/` (`Dockerfile`, `docker-compose.yaml`). The
-image is runtime-only: it packages just the `dist/` output — the server bundle
-is self-contained (esbuild), so no `node_modules` is needed — and the
-container serves both the API and the built frontend on :4000. The build
-context is the repository root, so `dist/` must exist first.
+The Docker files live in `docker/` (`Dockerfile`, `docker-compose.yaml`).
+The build is **multi-stage**: a `node:22-alpine` builder stage installs the
+dependencies and compiles the app (`npm ci && npm run build`) *inside*
+Docker, and the runtime image packages just the `dist/` output — the server
+bundle is self-contained (esbuild), so no `node_modules` is needed there.
+**Only Docker is required on the host** — no Node, no npm, no build step:
+a plain `git clone` is enough.
 
 ```bash
-npm run build
+git clone <repo> && cd weblate-friendly-bridge
 docker compose -f docker/docker-compose.yaml up -d --build
 # image only:
 docker build -f docker/Dockerfile -t weblate-friendly-bridge:latest .

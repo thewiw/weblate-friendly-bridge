@@ -1,12 +1,12 @@
-# Deploy the built app: `npm run build` first, then `docker compose up -d --build`.
-# The image packages only the dist/ output — the server bundle is
-# self-contained (esbuild) and serves dist/client itself.
+# Deploy from a plain clone — only Docker is needed on the host (no
+# Node/npm): `docker compose up -d --build` compiles the app inside the
+# build (multi-stage Dockerfile), then runs it.
 services:
   weblate-friendly-bridge:
     build:
-      # Context is the repo root (where dist/ lives); the Dockerfile
-      # is in this docker/ directory. COPY paths in the Dockerfile are
-      # relative to the context, so they reference dist/ directly.
+      # Context is the repo root (sources + lockfile); the Dockerfile
+      # is in this docker/ directory and builds dist/ in a node builder
+      # stage. COPY paths in the Dockerfile are relative to the context.
       context: ..
       dockerfile: docker/Dockerfile
     image: weblate-friendly-bridge:latest

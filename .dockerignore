@@ -1,0 +1,7 @@
+# Kept out of the build context: the builder stage installs dependencies
+# itself (npm ci) and compiles from source, so host state must not leak in.
+node_modules
+dist
+.git
+.env
+*.log
