@@ -221,6 +221,7 @@ export function createRouter(
           session.twofactorUrl,
           session.csrfToken,
           body.token,
+          session.username,
         );
         store.activate(sid!, outcome.cookies, outcome.username, outcome.csrfToken);
         res.json({ status: 'ok', username: outcome.username });

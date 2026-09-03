@@ -4,6 +4,7 @@
  * credentials at login time) never leave the server.
  */
 import { randomUUID } from 'node:crypto';
+import { logWarn } from '../log.js';
 
 export interface WeblateSession {
   /** Cookie header to send with every upstream request, e.g.
@@ -112,8 +113,14 @@ export interface SecondFactorForm {
 /**
  * Detects the second-factor form on a page (django-otp renders an
  * `otp_token` input; WebAuthn-only pages have none we can use).
+ * `pageUrl` is the URL the page was fetched from — an empty form `action`
+ * means "post to the current URL" and must resolve against it.
  */
-export function parseSecondFactor(html: string, baseUrl: string): SecondFactorForm | null {
+export function parseSecondFactor(
+  html: string,
+  baseUrl: string,
+  pageUrl: string,
+): SecondFactorForm | null {
   if (!/name="otp_token"/.test(html)) return null;
   const formMatch = /<form[^>]*>([\s\S]*?)<\/form>/.exec(
     html.slice(Math.max(0, html.indexOf('otp_token') - 600), html.indexOf('otp_token') + 600),
@@ -121,9 +128,9 @@ export function parseSecondFactor(html: string, baseUrl: string): SecondFactorFo
   const actionMatch =
     formMatch !== null ? /action="([^"]*)"/.exec(formMatch[0] ?? '') : null;
   const csrf = parseCsrfToken(html);
-  const action = actionMatch?.[1] ?? '/accounts/login/twofactor/';
+  const action = actionMatch?.[1] ?? '';
   return {
-    action: new URL(action, baseUrl).toString(),
+    action: new URL(action, pageUrl !== '' ? pageUrl : baseUrl).toString(),
     csrfToken: csrf ?? '',
     hasOtpField: true,
   };
@@ -315,12 +322,13 @@ export async function weblateLogin(
 
   // Follow the redirect chain manually (Django answers 302 on success),
   // stopping if a second-factor form appears (TOTP-enabled accounts).
+  let pageUrl = `${baseUrl}/accounts/login/`;
   for (let hops = 0; hops < 6; hops++) {
     if (res.status >= 300 && res.status < 400) {
       const location = res.headers.get('Location');
       if (location === null) break;
-      const next = new URL(location, baseUrl).toString();
-      res = await loginFetch(fetchImpl, next, {
+      pageUrl = new URL(location, baseUrl).toString();
+      res = await loginFetch(fetchImpl, pageUrl, {
         method: 'GET',
         redirect: 'manual',
         headers: { Cookie: cookieHeader(cookies) },
@@ -330,7 +338,7 @@ export async function weblateLogin(
     }
     if (res.status === 200) {
       const pageHtml = await res.text();
-      const secondFactor = parseSecondFactor(pageHtml, baseUrl);
+      const secondFactor = parseSecondFactor(pageHtml, baseUrl, pageUrl);
       if (secondFactor !== null) {
         return {
           status: 'totp_required',
@@ -391,7 +399,11 @@ async function finishLogin(
         headers: { Accept: 'text/html' },
       });
       cookies = mergeCookies(cookies, page.headers.getSetCookie());
-      const form = parseSecondFactor(await page.text(), baseUrl);
+      const form = parseSecondFactor(
+        await page.text(),
+        baseUrl,
+        `${baseUrl}/accounts/login/`,
+      );
       if (form !== null) {
         return {
           status: 'totp_required',
@@ -444,6 +456,9 @@ export async function weblateLoginTotp(
   twofactorUrl: string,
   csrfToken: string,
   token: string,
+  /** Username from the first phase — the resolved identity when the API
+   *  cannot tell us (no /api/user/ on every instance). */
+  username: string = 'totp',
   fetchImpl: LoginFetch = fetch,
 ): Promise<{ status: 'ok'; cookies: Record<string, string>; csrfToken: string; username: string }> {
   const body = new URLSearchParams({
@@ -488,10 +503,21 @@ export async function weblateLoginTotp(
       headers: { Cookie: cookieHeader(jar) },
     });
     jar = mergeCookies(jar, last.headers.getSetCookie());
+    logWarn(
+      `[auth] second factor: hop ${hops} -> HTTP ${last.status} ${new URL(last.url ?? '', baseUrl).pathname}` +
+        ` (cookies now: ${Object.keys(jar).join(', ') || 'none'})`,
+    );
   }
 
-  const outcome = await finishLogin(fetchImpl, baseUrl, jar, 'totp');
+  // A landing page that still shows the second-factor form means the code
+  // was not accepted (some flows re-render via redirect instead of 200).
+  if (last.status === 200 && /name="otp_token"/.test(await last.clone().text())) {
+    throw new LoginError('Invalid or expired authentication code.', true);
+  }
+
+  const outcome = await finishLogin(fetchImpl, baseUrl, jar, username);
   if (outcome.status !== 'ok') {
+    logWarn('[auth] second factor: session still pending a second factor after submit');
     throw new LoginError(
       'Weblate still asks for a second factor after the code was submitted.',
     );
