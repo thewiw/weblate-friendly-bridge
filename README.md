@@ -125,8 +125,9 @@ server start; missing variables or malformed CIDR entries disable public
 export; a key rejected by Weblate (at start or later) is reported and answers
 503 until it works again.
 
-Both share one implementation (`src/server/rest/operations.ts`). Connect an
-MCP client (Claude Code examples below):
+Both share one implementation (`src/server/rest/operations.ts`).
+
+### Connect a MCP client
 
 **Claude Code running directly on the host** (the server is on the same
 machine, default port 4000):
