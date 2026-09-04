@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { login, loginTotp } from '../api/queries.js';
+import { login, loginTotp, logout } from '../api/queries.js';
 
 export interface LoginViewProps {
   onSuccess: () => void;
@@ -49,6 +49,14 @@ export function LoginView({ onSuccess }: LoginViewProps) {
     } finally {
       setBusy(false);
     }
+  };
+
+  /** Back to the credentials step: the pending (pre-2FA) session is discarded. */
+  const cancelTotp = (): void => {
+    void logout().catch(() => {}); // server-side pending session cleanup; best effort
+    setStep('credentials');
+    setToken('');
+    setError(null);
   };
 
   return (
@@ -153,6 +161,14 @@ export function LoginView({ onSuccess }: LoginViewProps) {
             disabled={busy || token.trim() === ''}
           >
             {busy ? 'Verifying…' : 'Verify'}
+          </button>
+          <button
+            type="button"
+            className="rounded border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+            disabled={busy}
+            onClick={cancelTotp}
+          >
+            Cancel
           </button>
         </form>
       )}

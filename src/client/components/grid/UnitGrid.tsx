@@ -61,7 +61,10 @@ export function UnitGrid({ page, showDates, hiddenLangs, selection, onEditCell }
   });
 
   const dateCols = showDates ? 2 : 0;
-  const stickySourceLeft = CHECK_W + ID_W + dateCols * DATE_W;
+  // With dates hidden, the two date columns' width is given to the ID
+  // column instead — long context keys otherwise truncate early.
+  const idW = showDates ? ID_W : ID_W + dateCols * DATE_W;
+  const stickySourceLeft = CHECK_W + idW + dateCols * DATE_W;
 
   return (
     <div
@@ -72,7 +75,7 @@ export function UnitGrid({ page, showDates, hiddenLangs, selection, onEditCell }
         style={{
           minWidth:
             CHECK_W +
-            ID_W +
+            idW +
             dateCols * DATE_W +
             SOURCE_MIN +
             langs.length * LANG_MIN,
@@ -98,7 +101,7 @@ export function UnitGrid({ page, showDates, hiddenLangs, selection, onEditCell }
           </div>
           <div
             className="wl-cell wl-head wl-sticky-id"
-            style={{ flex: `0 0 ${ID_W}px`, left: CHECK_W }}
+            style={{ flex: `0 0 ${idW}px`, left: CHECK_W }}
           >
             ID
           </div>
@@ -175,7 +178,7 @@ export function UnitGrid({ page, showDates, hiddenLangs, selection, onEditCell }
                     </div>
                     <div
                       className="wl-cell wl-sticky-id text-xs text-slate-400 tabular-nums"
-                      style={{ flex: `0 0 ${ID_W}px`, left: CHECK_W }}
+                      style={{ flex: `0 0 ${idW}px`, left: CHECK_W }}
                       title={row.context !== ''
                         ? `${row.context} · source unit #${row.sourceUnitId}`
                         : `source unit #${row.sourceUnitId}`}

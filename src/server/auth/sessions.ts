@@ -414,6 +414,16 @@ async function finishLogin(
         };
       }
     }
+    if (probe.status === 429) {
+      // Weblate throttles/locks repeated sign-in attempts from one address
+      // (django-axes lockout or the API rate limit).
+      const retryAfter = probe.headers.get('Retry-After');
+      throw new LoginError(
+        'Too many sign-in attempts — Weblate is rate-limiting this address (HTTP 429). ' +
+          `Wait for the cooldown${retryAfter !== null ? ` (Retry-After: ${retryAfter}s)` : ' (usually about an hour)'}, ` +
+          'sign in from another IP, or clear the block in Weblate (manage.py axes_reset).',
+      );
+    }
     throw new LoginError(
       `Sign-in appeared to succeed, but Weblate did not accept the session (HTTP ${probe.status}).`,
     );
