@@ -63,7 +63,7 @@ export function UnitGrid({ page, showDates, hiddenLangs, selection, onEditCell }
   const dateCols = showDates ? 2 : 0;
   // With dates hidden, the two date columns' width is given to the ID
   // column instead — long context keys otherwise truncate early.
-  const idW = showDates ? ID_W : ID_W + dateCols * DATE_W;
+  const idW = showDates ? ID_W : ID_W + 2 * DATE_W;
   const stickySourceLeft = CHECK_W + idW + dateCols * DATE_W;
 
   return (
