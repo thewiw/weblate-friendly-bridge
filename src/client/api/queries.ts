@@ -403,3 +403,84 @@ export function useEditUnit() {
     },
   });
 }
+// ---- Search & replace (bulk tool) ----
+
+export interface SearchReplaceMatch {
+  context: string;
+  language: string;
+  unitId: number;
+  state: UnitState;
+  before: string[];
+  after: string[];
+}
+
+export interface SearchReplaceVars {
+  project: string;
+  component: string;
+  sort: SortKey;
+  filter: string;
+  q: string;
+  hiddenLangs: string;
+  ids: string;
+  listId: string;
+  selection: { all: boolean; keys: string[] };
+  search: string;
+  replace: string;
+  ignoreCase: boolean;
+  wholeWord: boolean;
+  languages: string[];
+}
+
+/** Synchronous preview: which selected cells would change (cache scan). */
+export async function searchReplacePreview(
+  vars: SearchReplaceVars,
+): Promise<{ total: number; matches: SearchReplaceMatch[] }> {
+  return api<{ total: number; matches: SearchReplaceMatch[] }>('/search-replace/preview', {
+    method: 'POST',
+    body: JSON.stringify(vars),
+  });
+}
+
+/**
+ * Applies a search & replace as a background job (same job store + polling
+ * endpoint as useBulkState). Resolves with the job outcome.
+ */
+export function useSearchReplace() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: SearchReplaceVars): Promise<BulkStateResult> => {
+      const { jobId } = await api<{ jobId: string }>('/search-replace', {
+        method: 'POST',
+        body: JSON.stringify(vars),
+      });
+      for (;;) {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        const st = await api<{
+          status: 'running' | 'done' | 'error';
+          done: number;
+          total: number;
+          failed: number;
+          firstError?: string;
+          error?: string;
+        }>(`/bulk-state/${jobId}`);
+        if (st.status === 'done') {
+          return {
+            done: st.done,
+            total: st.total,
+            failed: st.failed,
+            skipped: 0,
+            notApplicable: 0,
+            alreadyInState: 0,
+            ...(st.firstError !== undefined ? { firstError: st.firstError } : {}),
+          };
+        }
+        if (st.status === 'error') {
+          throw new Error(st.error ?? 'Search & replace failed');
+        }
+      }
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['rows'] });
+    },
+  });
+}

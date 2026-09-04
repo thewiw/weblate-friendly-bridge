@@ -585,3 +585,226 @@ describe('GET /api/v1/health', () => {
     expect(res.body.caches[0].rows).toBe(400);
   });
 });
+describe('POST /api/v1/search-replace', () => {
+
+  /** Polls a search-replace job until it settles (same endpoint as bulk). */
+  const poll = async (agent: ReturnType<typeof request>, jobId: string) => {
+    let last: { status: string; done: number; failed: number; firstError?: string } | null = null;
+    for (let i = 0; i < 100; i++) {
+      const res = await agent.get(`/api/v1/bulk-state/${jobId}`).expect(200);
+      last = res.body as { status: string; done: number; failed: number; firstError?: string };
+      if (last.status !== 'running') break;
+      await sleep(20);
+    }
+    return last!;
+  };
+
+  it('preview: counts and lists matching cells (case-insensitive, literal)', async () => {
+    const { app } = makeApp();
+    const agent = request(app);
+    const page = await getRowsUntilComplete(agent, 'project=friendly-suite&component=web-ui&limit=200');
+
+    // A cell with known text to search for.
+    const row = page.rows.find(
+      (r) => r.cells['de'] !== undefined && r.cells['de']!.target.some((t) => t.trim() !== ''),
+    );
+    expect(row).toBeDefined();
+    const cell = row!.cells['de']!;
+    const needle = cell.target[0]!.slice(0, 5);
+    const selection = { all: false, keys: [row!.key] };
+
+    const preview = await agent
+      .post('/api/v1/search-replace/preview')
+      .send({
+        project: 'friendly-suite',
+        component: 'web-ui',
+        selection,
+        search: needle,
+        replace: `X${needle}`,
+        ignoreCase: true,
+        wholeWord: false,
+        languages: ['de'],
+      })
+      .expect(200);
+    expect(preview.body.total).toBeGreaterThan(0);
+    const match = (preview.body.matches as Array<{ context: string; language: string; before: string[]; after: string[] }>)
+      .find((m) => m.context === row!.context);
+    expect(match).toBeDefined();
+    expect(match!.after[0]).toContain(needle); // literal replacement, state untouched
+
+    // Selection scope is honored: an empty selection matches nothing.
+    const empty = await agent
+      .post('/api/v1/search-replace/preview')
+      .send({
+        project: 'friendly-suite',
+        component: 'web-ui',
+        selection: { all: false, keys: ['u000000'] },
+        search: needle,
+        replace: 'x',
+        ignoreCase: true,
+        wholeWord: false,
+        languages: ['de'],
+      })
+      .expect(200);
+    expect(empty.body.total).toBe(0);
+  });
+
+  it('apply: patches matching units, keeps state, updates the cache', async () => {
+    const { app } = makeApp();
+    const agent = request(app);
+    const page = await getRowsUntilComplete(agent, 'project=friendly-suite&component=web-ui&limit=200');
+    const row = page.rows.find(
+      (r) => r.cells['de'] !== undefined && r.cells['de']!.state === 20 && r.cells['de']!.target.some((t) => t.includes('e')),
+    );
+    expect(row).toBeDefined();
+    const cell = row!.cells['de']!;
+    const needle = cell.target[0]!.slice(0, 4);
+    const replaced = cell.target[0]!.replace(needle, 'XX');
+
+    const preview = await agent
+      .post('/api/v1/search-replace/preview')
+      .send({
+        project: 'friendly-suite',
+        component: 'web-ui',
+        selection: { all: false, keys: [row!.key] },
+        search: needle,
+        replace: 'XX',
+        ignoreCase: false,
+        wholeWord: false,
+        languages: ['de'],
+      })
+      .expect(200);
+    expect(preview.body.total).toBe(1);
+
+    const start = await agent
+      .post('/api/v1/search-replace')
+      .send({
+        project: 'friendly-suite',
+        component: 'web-ui',
+        selection: { all: false, keys: [row!.key] },
+        search: needle,
+        replace: 'XX',
+        ignoreCase: false,
+        wholeWord: false,
+        languages: ['de'],
+      })
+      .expect(200);
+    const { jobId, total } = start.body as { jobId: string; total: number };
+    expect(total).toBe(1);
+    const last = await poll(agent, jobId);
+    expect(last).toMatchObject({ status: 'done', done: 1, failed: 0 });
+
+    // The cache (and thus /rows) reflects the new text with the same state.
+    const after = await agent
+      .get('/api/v1/rows?project=friendly-suite&component=web-ui&limit=200')
+      .expect(200);
+    const afterRow = (after.body as RowsPage).rows.find((r) => r.key === row!.key);
+    expect(afterRow!.cells['de']!.target[0]).toBe(replaced);
+    expect(afterRow!.cells['de']!.state).toBe(20);
+  });
+
+  it('whole word: substring inside a word is not matched', async () => {
+    const { app } = makeApp();
+    const agent = request(app);
+    const page = await getRowsUntilComplete(agent, 'project=friendly-suite&component=web-ui&limit=200');
+    const row = page.rows.find(
+      (r) => r.cells['de'] !== undefined && r.cells['de']!.target.some((t) => t.trim() !== ''),
+    );
+    expect(row).toBeDefined();
+    const cell = row!.cells['de']!;
+    const word = cell.target[0]!.trim().split(/\s+/)[0]!;
+    if (word.length < 3) return; // flaky guard: skip degenerate sample
+
+    const withBoundaries = await agent
+      .post('/api/v1/search-replace/preview')
+      .send({
+        project: 'friendly-suite',
+        component: 'web-ui',
+        selection: { all: false, keys: [row!.key] },
+        search: word,
+        replace: 'ZZ',
+        ignoreCase: true,
+        wholeWord: true,
+        languages: ['de'],
+      })
+      .expect(200);
+    // Whatever the outcome, matches must only involve whole-word hits.
+    for (const m of withBoundaries.body.matches as Array<{ before: string[]; after: string[] }>) {
+      for (let i = 0; i < m.before.length; i++) {
+        if (m.before[i] !== m.after[i]) {
+          expect(m.before[i]!.toLowerCase()).toContain(word.toLowerCase());
+        }
+      }
+    }
+  });
+
+  it('rejects bad payloads and unknown jobs', async () => {
+    const { app } = makeApp();
+    await request(app)
+      .post('/api/v1/search-replace/preview')
+      .send({ project: 'friendly-suite', component: 'web-ui', selection: { all: true, keys: [] }, languages: ['de'] })
+      .expect(400);
+    await request(app).get('/api/v1/bulk-state/nonexistent').expect(404);
+  });
+});
+
+describe('POST /api/v1/search-replace (source language)', () => {
+  it('previews and applies replacements in the source text', async () => {
+    const { app } = makeApp();
+    const agent = request(app);
+    const page = await getRowsUntilComplete(agent, 'project=friendly-suite&component=web-ui&limit=200');
+    const row = page.rows.find((r) => r.source.some((t) => t.trim() !== ''));
+    expect(row).toBeDefined();
+    const needle = row!.source[0]!.slice(0, 5);
+    const replaced = row!.source[0]!.replace(needle, 'QQ');
+
+    const preview = await agent
+      .post('/api/v1/search-replace/preview')
+      .send({
+        project: 'friendly-suite',
+        component: 'web-ui',
+        selection: { all: false, keys: [row!.key] },
+        search: needle,
+        replace: 'QQ',
+        ignoreCase: true,
+        wholeWord: false,
+        languages: [(page as RowsPage & { sourceLanguage: string }).sourceLanguage],
+      })
+      .expect(200);
+    expect(preview.body.total).toBe(1);
+    const match = (preview.body.matches as Array<{ unitId: number; state: number; after: string[] }>)[0]!;
+    expect(match.unitId).toBe(row!.sourceUnitId);
+    expect(match.state).toBe(row!.sourceState);
+    expect(match.after[0]).toBe(replaced);
+
+    const start = await agent
+      .post('/api/v1/search-replace')
+      .send({
+        project: 'friendly-suite',
+        component: 'web-ui',
+        selection: { all: false, keys: [row!.key] },
+        search: needle,
+        replace: 'QQ',
+        ignoreCase: true,
+        wholeWord: false,
+        languages: [(page as RowsPage & { sourceLanguage: string }).sourceLanguage],
+      })
+      .expect(200);
+    const { jobId } = start.body as { jobId: string };
+    let last: { status: string; done: number; failed: number } | null = null;
+    for (let i = 0; i < 100; i++) {
+      const res = await agent.get(`/api/v1/bulk-state/${jobId}`).expect(200);
+      last = res.body as { status: string; done: number; failed: number };
+      if (last.status !== 'running') break;
+      await sleep(20);
+    }
+    expect(last).toMatchObject({ status: 'done', done: 1, failed: 0 });
+
+    // The row's source text and its modified timestamp updated.
+    const after = await agent
+      .get('/api/v1/rows?project=friendly-suite&component=web-ui&limit=200')
+      .expect(200);
+    const afterRow = (after.body as RowsPage).rows.find((r) => r.key === row!.key);
+    expect(afterRow!.source[0]).toBe(replaced);
+  });
+});

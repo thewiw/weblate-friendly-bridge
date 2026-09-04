@@ -124,6 +124,11 @@ export function UnitGrid({ page, showDates, hiddenLangs, selection, onEditCell }
             }}
           >
             Source
+            {page.sourceLanguage !== '' && (
+              <span className="ml-1.5 text-xs font-normal text-slate-400">
+                {page.sourceLanguage.toUpperCase()}
+              </span>
+            )}
           </div>
           {langs.map((lang) => (
             <div

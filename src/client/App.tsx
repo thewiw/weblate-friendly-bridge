@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { Cell, RowFilter, SortKey, SourceRow } from '../shared/rows.js';
 import { STATE_LABELS } from '../shared/rows.js';
 import type { UnitState } from '../shared/weblate-dto.js';
-import { useAuth, useBulkState, useComponents, useEditUnit, useHealth, useProjects, useRows, logout, triggerRefresh, uploadIdList } from './api/queries.js';
+import { useAuth, useBulkState, useComponents, useEditUnit, useHealth, useProjects, useRows, useSearchReplace, triggerRefresh, uploadIdList } from './api/queries.js';
 import { useViewParams, parseHiddenLangs } from './state/url-state.js';
 import {
   emptySelection,
@@ -17,6 +17,7 @@ import { TopBar } from './components/TopBar.js';
 import { Toolbar, PAGE_SIZE, parseIdList, INLINE_ID_LIMIT, MAX_ID_LIST } from './components/Toolbar.js';
 import { ProgressBanner } from './components/ProgressBanner.js';
 import { UnitGrid } from './components/grid/UnitGrid.js';
+import { SearchReplaceDialog } from './components/SearchReplaceDialog.js';
 import { CellEditor } from './components/grid/CellEditor.js';
 import { LoginView } from './components/LoginView.js';
 import { ExportDialog } from './components/ExportDialog.js';
@@ -211,6 +212,8 @@ export function App() {
 
   // ---- Bulk status tools ----
   const bulk = useBulkState();
+  const replace = useSearchReplace();
+  const [searchReplaceOpen, setSearchReplaceOpen] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
   /** Export dialog open (grid mode) or multi-select mode ('multi'). */
   const [exportMode, setExportMode] = useState<'grid' | 'multi' | null>(null);
@@ -362,6 +365,16 @@ export function App() {
               <span className="text-slate-400">|</span>
               <button
                 type="button"
+                className="rounded border border-sky-300 bg-white px-2 py-0.5 text-sky-700 hover:bg-sky-100 disabled:opacity-40"
+                disabled={replace.isPending}
+                title="Search and replace text in the selected rows"
+                onClick={() => setSearchReplaceOpen(true)}
+              >
+                Search &amp; replace
+              </button>
+              <span className="text-slate-400">|</span>
+              <button
+                type="button"
                 className="rounded border border-slate-300 bg-white px-2 py-0.5 hover:bg-slate-100"
                 onClick={() => {
                   selectionAnchor.current = null;
@@ -480,6 +493,30 @@ export function App() {
             <Spinner label="Saving translation…" />
           </div>
         </div>
+      )}
+
+      {/* Bulk search & replace: preview, then apply. */}
+      {searchReplaceOpen && page !== undefined && (
+        <SearchReplaceDialog
+          base={{
+            project: view.project,
+            component: view.component,
+            sort: view.sort,
+            filter: view.filter,
+            q: view.q,
+            hiddenLangs: view.hiddenLangs,
+            ids: view.ids,
+            listId: view.listId,
+            selection: { all: selection.all, keys: [...selection.keys] },
+          }}
+          languages={page.sourceLanguage !== '' ? [page.sourceLanguage, ...visibleLangs] : visibleLangs}
+          sourceLanguage={page.sourceLanguage}
+          languageNames={Object.fromEntries(page.languages.map((l) => [l.code, l.name]))}
+          onClose={(message, kind) => {
+            setSearchReplaceOpen(false);
+            if (message !== undefined) toast(message, kind === 'error' ? 'error' : 'success');
+          }}
+        />
       )}
 
       {/* Bulk tools ask for confirmation first: scope, counts, cancel. */}

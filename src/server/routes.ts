@@ -7,15 +7,17 @@ import type { CookieOptions, Request, Response, NextFunction } from 'express';
 import { randomUUID } from 'node:crypto';
 import pLimit from 'p-limit';
 import { z } from 'zod';
-import { ROW_FILTERS, SORT_KEYS, type Cell } from '../shared/rows.js';
+import { ROW_FILTERS, SORT_KEYS, type Cell, type SourceRow } from '../shared/rows.js';
+import type { UnitState } from '../shared/weblate-dto.js';
 import { exportRequestSchema, type ExportRequest } from '../shared/export.js';
 import { describeExportRequest, listComponentLanguages } from './export/export-service.js';
 import { ExportJobStore } from './export/export-jobs.js';
 import { UpstreamError } from './http-errors.js';
 import { config } from './config.js';
 import type { CacheRegistry } from './cache/cache-registry.js';
+import type { ComponentCache } from './cache/component-cache.js';
 import { createSessionWeblateApi, type WeblateApi } from './weblate/client.js';
-import { unitToCell } from './cache/row-model.js';
+import { recomputeLastUpdated, unitToCell } from './cache/row-model.js';
 import { IdListStore, MAX_IDS_PER_LIST } from './id-lists.js';
 import {
   LoginError,
@@ -620,6 +622,249 @@ export function createRouter(
       ...(job.firstError !== null ? { firstError: job.firstError } : {}),
       ...(job.error !== null ? { error: job.error } : {}),
     });
+  });
+
+  // ---- Search & replace (selected rows, visible languages) ----
+  // The preview answers synchronously from the cache; the apply runs as a
+  // background job (same job store + polling shape as /bulk-state).
+
+  const searchReplaceSchema = z.object({
+    project: z.string().min(1),
+    component: z.string().min(1),
+    sort: z.enum(SORT_KEYS).default('created-desc'),
+    filter: z.enum(ROW_FILTERS).default('all'),
+    q: z.string().optional(),
+    hiddenLangs: z.string().optional(),
+    ids: z.string().optional(),
+    listId: z.string().optional(),
+    selection: z.object({
+      all: z.boolean(),
+      keys: z.array(z.string().min(1)).max(100_000),
+    }),
+    search: z.string().min(1).max(500),
+    replace: z.string().max(2000).default(''),
+    ignoreCase: z.boolean().default(true),
+    wholeWord: z.boolean().default(false),
+    languages: z.array(z.string().min(1)).min(1),
+  });
+
+  /** Literal-text search pattern: everything is escaped, so `$` in the
+   *  search text is never a regex group reference. */
+  const buildSearchRegex = (search: string, ignoreCase: boolean, wholeWord: boolean): RegExp => {
+    const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Whole word = not adjacent to any letter/digit (unicode-aware).
+    const pattern = wholeWord
+      ? `(?<!\\p{L})(?<!\\p{N})${escaped}(?!\\p{L})(?!\\p{N})`
+      : escaped;
+    return new RegExp(pattern, ignoreCase ? 'giu' : 'gu');
+  };
+
+  type SearchReplaceBody = z.infer<typeof searchReplaceSchema>;
+  interface SearchReplaceMatch {
+    context: string;
+    language: string;
+    unitId: number;
+    state: UnitState;
+    before: string[];
+    after: string[];
+    /** The live cache cell — updated in place on apply (like /bulk-state).
+     *  Undefined for source-language matches: those update `row.source`. */
+    cell?: Cell;
+    row?: SourceRow;
+    /** Row key — patches of one string are serialized (Weblate answers 500
+     *  when units of the same string are patched concurrently). */
+    rowKey: string;
+  }
+
+  /**
+   * Cells of the selected rows (same scope rules as /bulk-state: current
+   * filters, hidden languages, selection) whose target matches the search
+   * text in at least one plural form. Read-only and missing cells are
+   * skipped. The replacement is inserted literally (`$` in the replace
+   * text has no special meaning).
+   */
+  const findSearchReplaceMatches = (
+    cache: ComponentCache,
+    body: SearchReplaceBody,
+    regex: RegExp,
+  ): SearchReplaceMatch[] => {
+    const rows = cache.filteredRows({
+      sort: body.sort,
+      filter: body.filter,
+      search: body.q,
+      hiddenLangs: body.hiddenLangs,
+      contextSet: resolveContextKeys(body),
+    });
+    const keySet = new Set(body.selection.keys);
+    const selected = body.selection.all
+      ? rows.filter((r) => !keySet.has(r.key))
+      : rows.filter((r) => keySet.has(r.key));
+
+    const languages = new Set(body.languages);
+    const matches: SearchReplaceMatch[] = [];
+    const matchText = (text: string[]): boolean =>
+      text.some((t) => {
+        regex.lastIndex = 0;
+        return regex.test(t);
+      });
+    for (const row of selected) {
+      for (const lang of languages) {
+        if (lang === cache.sourceLanguage) {
+          // The source text lives on the row, not in a language cell.
+          if (row.sourceState === 100) continue; // read-only source
+          if (!matchText(row.source)) continue;
+          matches.push({
+            context: row.context,
+            rowKey: row.key,
+            language: lang,
+            unitId: row.sourceUnitId,
+            state: row.sourceState,
+            before: row.source,
+            after: row.source.map((t) => t.replace(regex, () => body.replace)),
+            row,
+          });
+          continue;
+        }
+        const cell = row.cells[lang];
+        if (cell === undefined || cell.state === 100) continue; // read-only
+        if (!matchText(cell.target)) continue;
+        matches.push({
+          context: row.context,
+          rowKey: row.key,
+          language: lang,
+          unitId: cell.unitId,
+          state: cell.state,
+          before: cell.target,
+          after: cell.target.map((t) => t.replace(regex, () => body.replace)),
+          cell,
+        });
+      }
+    }
+    return matches;
+  };
+
+  router.post('/search-replace/preview', (req, res, next) => {
+    try {
+      const body = searchReplaceSchema.parse(req.body);
+      const cache = registry.get(body.project, body.component, forRequest(req));
+      const matches = findSearchReplaceMatches(cache, body, buildSearchRegex(
+        body.search,
+        body.ignoreCase,
+        body.wholeWord,
+      ));
+      res.json({
+        total: matches.length,
+        // The live cell/row references stay server-side.
+        matches: matches.map(({ cell: _cell, row: _row, ...rest }) => rest),
+      });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        res.status(400).json({ error: err.issues[0]?.message ?? 'Bad body' });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  router.post('/search-replace', (req, res, next) => {
+    let body: SearchReplaceBody;
+    try {
+      body = searchReplaceSchema.parse(req.body);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        res.status(400).json({ error: err.issues[0]?.message ?? 'Bad body' });
+        return;
+      }
+      next(err);
+      return;
+    }
+    try {
+      const cache = registry.get(body.project, body.component, forRequest(req));
+      const regex = buildSearchRegex(body.search, body.ignoreCase, body.wholeWord);
+      const matches = findSearchReplaceMatches(cache, body, regex);
+
+      const reqApi = forRequest(req);
+      const budget = reqApi.getRateBudget();
+      if (budget.remaining !== null && budget.remaining < matches.length) {
+        res.status(429).json({
+          error: `Rate budget too low: ${budget.remaining} requests left, ${matches.length} needed.`,
+        });
+        return;
+      }
+
+      const stamp = new Date().toISOString();
+      // Each match is one patch: new target, state unchanged. Patches of
+      // the same string (row) are serialized — Weblate answers 500 when
+      // units of one string are patched concurrently (e.g. its source and
+      // a translation). Different strings still run in parallel.
+      const groups = new Map<string, Array<{ unitId: number; target: string[]; state: UnitState; cell?: Cell; row?: SourceRow }>>();
+      for (const m of matches) {
+        const job = { unitId: m.unitId, target: m.after, state: m.state, cell: m.cell, row: m.row };
+        const group = groups.get(m.rowKey) ?? [];
+        group.push(job);
+        groups.set(m.rowKey, group);
+      }
+
+      while (bulkJobs.size >= 50) {
+        const oldest = bulkJobs.keys().next().value;
+        if (oldest === undefined) break;
+        bulkJobs.delete(oldest);
+      }
+      const job: BulkJob = {
+        status: 'running',
+        done: 0,
+        failed: 0,
+        skipped: 0,
+        notApplicable: 0,
+        alreadyInState: 0,
+        firstError: null,
+        total: matches.length,
+        error: null,
+      };
+      const jobId = randomUUID();
+      bulkJobs.set(jobId, job);
+
+      // Background apply: each match is one Weblate PATCH (target + state,
+      // state unchanged); the cache cell is updated in place.
+      void (async () => {
+        const limit = pLimit(config.concurrency);
+        await Promise.all(
+          [...groups.values()].map((group) =>
+            limit(async () => {
+              // One string at a time, every patch in sequence.
+              for (const t of group) {
+                try {
+                  await reqApi.patchUnit(t.unitId, { target: t.target, state: t.state });
+                  if (t.cell !== undefined) {
+                    t.cell.target = t.target;
+                    t.cell.lastUpdated = stamp;
+                  } else if (t.row !== undefined) {
+                    // Source-language match: the text lives on the row.
+                    t.row.source = t.target;
+                    t.row.sourceLastUpdated = stamp;
+                    recomputeLastUpdated(t.row);
+                  }
+                  job.done++;
+                } catch (err) {
+                  if (job.firstError === null) {
+                    job.firstError = err instanceof Error ? err.message : String(err);
+                  }
+                  job.failed++;
+                }
+              }
+            }),
+          ),
+        );
+        job.status = 'done';
+      })().catch((err: unknown) => {
+        job.status = 'error';
+        job.error = err instanceof Error ? err.message : String(err);
+      });
+
+      res.json({ jobId, total: matches.length });
+    } catch (err) {
+      next(err);
+    }
   });
 
   router.get('/health', (req, res) => {
