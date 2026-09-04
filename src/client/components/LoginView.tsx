@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { login, loginTotp, logout } from '../api/queries.js';
 
 export interface LoginViewProps {
@@ -18,6 +18,13 @@ export function LoginView({ onSuccess }: LoginViewProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const totpInputRef = useRef<HTMLInputElement>(null);
+
+  // When the second-factor view appears, put the cursor in the code box
+  // (autoFocus alone can be lost after the async first-phase round-trip).
+  useEffect(() => {
+    if (step === 'totp') totpInputRef.current?.focus();
+  }, [step]);
 
   const submitCredentials = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -141,7 +148,7 @@ export function LoginView({ onSuccess }: LoginViewProps) {
           <label className="flex flex-col gap-1 text-sm text-slate-600">
             Authentication code
             <input
-              autoFocus
+              ref={totpInputRef}
               inputMode="numeric"
               placeholder="123 456"
               className="rounded border border-slate-300 px-2 py-1.5 text-sm tracking-widest focus:border-sky-500 focus:outline-none"
