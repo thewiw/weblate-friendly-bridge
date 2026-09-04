@@ -154,6 +154,7 @@ export function createRouter(
       opts.auth.baseUrl,
       session.cookies,
       session.csrfToken,
+      req.ip ?? '',
     );
   };
 
@@ -180,7 +181,7 @@ export function createRouter(
         const body = z
           .object({ username: z.string().min(1), password: z.string().min(1) })
           .parse(req.body);
-        const outcome = await weblateLogin(baseUrl, body.username, body.password);
+        const outcome = await weblateLogin(baseUrl, body.username, body.password, req.ip ?? '');
         if (outcome.status === 'totp_required') {
           // Password accepted; keep the partially-authenticated Weblate
           // session server-side and ask the user for the second factor.
@@ -222,6 +223,7 @@ export function createRouter(
           session.csrfToken,
           body.token,
           session.username,
+          req.ip ?? '',
         );
         store.activate(sid!, outcome.cookies, outcome.username, outcome.csrfToken);
         res.json({ status: 'ok', username: outcome.username });

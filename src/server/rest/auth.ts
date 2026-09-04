@@ -172,7 +172,7 @@ export function createApiKeyAuth(opts: RestAuthOptions) {
           }
           req.restAuth = {
             username: 'public-export',
-            api: createTokenWeblateApi(opts.weblateUrl, opts.publicExport!.apiKey.trim()),
+            api: createTokenWeblateApi(opts.weblateUrl, opts.publicExport!.apiKey.trim(), req.ip ?? ''),
           };
           next();
         })().catch(() => {
@@ -200,7 +200,7 @@ export function createApiKeyAuth(opts: RestAuthOptions) {
         api:
           opts.mode === 'mock'
             ? opts.mockApi
-            : createTokenWeblateApi(opts.weblateUrl, key),
+            : createTokenWeblateApi(opts.weblateUrl, key, req.ip ?? ''),
       };
       next();
     })().catch((err: unknown) => {

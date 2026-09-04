@@ -80,6 +80,10 @@ export class LiveWeblateClient implements WeblateApi {
   constructor(
     private readonly baseUrl: string,
     private readonly auth: WeblateAuth,
+    /** Originating client IP, sent as X-Forwarded-For. Instances behind a
+     *  reverse proxy (IP_BEHIND_REVERSE_PROXY) cannot obtain a remote IP
+     *  without it and then rate-limit every such request in one bucket. */
+    private readonly forwardedFor: string = '',
   ) {}
 
   private authHeaders(): Record<string, string> {
@@ -218,6 +222,7 @@ export class LiveWeblateClient implements WeblateApi {
         headers: {
           ...this.authHeaders(),
           Accept: 'application/json',
+          ...(this.forwardedFor !== '' ? { 'X-Forwarded-For': this.forwardedFor } : {}),
           ...init.headers,
         },
       });
@@ -281,15 +286,21 @@ export function createSessionWeblateApi(
   baseUrl: string,
   cookies: string,
   csrfToken: string,
+  /** Originating client IP for X-Forwarded-For (see LiveWeblateClient). */
+  forwardedFor: string = '',
 ): WeblateApi {
   return new LiveWeblateClient(baseUrl, {
     kind: 'session',
     cookies,
     csrfToken,
-  });
+  }, forwardedFor);
 }
 
 /** A client authenticated by a Weblate API key (external REST API). */
-export function createTokenWeblateApi(baseUrl: string, token: string): WeblateApi {
-  return new LiveWeblateClient(baseUrl, { kind: 'token', token });
+export function createTokenWeblateApi(
+  baseUrl: string,
+  token: string,
+  forwardedFor: string = '',
+): WeblateApi {
+  return new LiveWeblateClient(baseUrl, { kind: 'token', token }, forwardedFor);
 }

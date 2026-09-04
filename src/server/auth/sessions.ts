@@ -66,12 +66,13 @@ async function scrapeCsrfToken(
   fetchImpl: LoginFetch,
   baseUrl: string,
   cookies: Record<string, string>,
+  forwardedFor: string = '',
 ): Promise<{ token: string; cookies: Record<string, string> }> {
   let jar = cookies;
   try {
     const res = await loginFetch(fetchImpl, `${baseUrl}/accounts/profile/`, {
       method: 'GET',
-      headers: { Cookie: cookieHeader(jar), Accept: 'text/html' },
+      headers: withForwardedFor(forwardedFor, { Cookie: cookieHeader(jar), Accept: 'text/html' }),
     });
     jar = mergeCookies(jar, res.headers.getSetCookie());
     if (res.status === 200) {
@@ -267,6 +268,16 @@ export function describeNetworkError(err: unknown): string {
  * with a second-factor form instead of a session; the outcome is
  * 'totp_required' and the login completes via weblateLoginTotp().
  */
+
+/** Adds the originating client IP as X-Forwarded-For when known — instances
+ *  behind a reverse proxy cannot obtain a remote IP without it and then
+ *  rate-limit every such request into one shared bucket (HTTP 429). */
+const withForwardedFor = (
+  forwardedFor: string,
+  headers: Record<string, string> = {},
+): Record<string, string> =>
+  forwardedFor === '' ? headers : { ...headers, 'X-Forwarded-For': forwardedFor };
+
 export type LoginOutcome =
   | { status: 'ok'; cookies: Record<string, string>; csrfToken: string; username: string }
   | {
@@ -281,6 +292,8 @@ export async function weblateLogin(
   baseUrl: string,
   username: string,
   password: string,
+  /** Originating client IP, forwarded to Weblate (X-Forwarded-For). */
+  forwardedFor: string = '',
   fetchImpl: LoginFetch = fetch,
 ): Promise<LoginOutcome> {
   let cookies: Record<string, string> = {};
@@ -288,7 +301,7 @@ export async function weblateLogin(
   // 1. Fetch the login page and its CSRF token.
   const page = await loginFetch(fetchImpl, `${baseUrl}/accounts/login/`, {
     method: 'GET',
-    headers: { Accept: 'text/html' },
+    headers: withForwardedFor(forwardedFor, { Accept: 'text/html' }),
   });
   if (page.status !== 200) {
     throw new LoginError(`Weblate login page returned HTTP ${page.status}`);
@@ -311,11 +324,11 @@ export async function weblateLogin(
   let res = await loginFetch(fetchImpl, `${baseUrl}/accounts/login/`, {
     method: 'POST',
     redirect: 'manual',
-    headers: {
+    headers: withForwardedFor(forwardedFor, {
       'Content-Type': 'application/x-www-form-urlencoded',
       Cookie: cookieHeader(cookies),
       Referer: `${baseUrl}/accounts/login/`,
-    },
+    }),
     body: body.toString(),
   });
   cookies = mergeCookies(cookies, res.headers.getSetCookie());
@@ -331,7 +344,7 @@ export async function weblateLogin(
       res = await loginFetch(fetchImpl, pageUrl, {
         method: 'GET',
         redirect: 'manual',
-        headers: { Cookie: cookieHeader(cookies) },
+        headers: withForwardedFor(forwardedFor, { Cookie: cookieHeader(cookies) }),
       });
       cookies = mergeCookies(cookies, res.headers.getSetCookie());
       continue;
@@ -370,7 +383,7 @@ export async function weblateLogin(
     break;
   }
 
-  return finishLogin(fetchImpl, baseUrl, cookies, username);
+  return finishLogin(fetchImpl, baseUrl, cookies, username, forwardedFor);
 }
 
 /** Shared completion: API probe + best-effort username resolution. */
@@ -379,6 +392,7 @@ async function finishLogin(
   baseUrl: string,
   cookies: Record<string, string>,
   username: string,
+  forwardedFor: string = '',
 ): Promise<
   | { status: 'ok'; cookies: Record<string, string>; csrfToken: string; username: string }
   | { status: 'totp_required'; cookies: Record<string, string>; twofactorUrl: string; csrfToken: string; username: string }
@@ -389,14 +403,14 @@ async function finishLogin(
   // (unlike /api/user/, which is not universal).
   const probe = await loginFetch(fetchImpl, `${baseUrl}/api/projects/`, {
     method: 'GET',
-    headers: { Cookie: cookieHeader(cookies), Accept: 'application/json' },
+    headers: withForwardedFor(forwardedFor, { Cookie: cookieHeader(cookies), Accept: 'application/json' }),
   });
   if (probe.status !== 200) {
     if (probe.status === 403 || probe.status === 401) {
       // Session not fully authenticated -> a second factor may still be pending.
       const page = await loginFetch(fetchImpl, `${baseUrl}/accounts/login/`, {
         method: 'GET',
-        headers: { Accept: 'text/html' },
+        headers: withForwardedFor(forwardedFor, { Accept: 'text/html' }),
       });
       cookies = mergeCookies(cookies, page.headers.getSetCookie());
       const form = parseSecondFactor(
@@ -434,7 +448,7 @@ async function finishLogin(
   // rendered HTML: instances with CSRF_USE_SESSIONS never set a csrftoken
   // cookie, and even on cookie-based instances Django rotates the token on
   // login, so a fresh scrape is always the safest source.
-  const scraped = await scrapeCsrfToken(fetchImpl, baseUrl, cookies);
+  const scraped = await scrapeCsrfToken(fetchImpl, baseUrl, cookies, forwardedFor);
   cookies = scraped.cookies;
   const csrfToken =
     scraped.token || cookies['csrftoken'] || cookies['csrfmiddlewaretoken'] || '';
@@ -443,7 +457,7 @@ async function finishLogin(
   let resolved = username;
   const profile = await fetchImpl(`${baseUrl}/api/user/`, {
     method: 'GET',
-    headers: { Cookie: cookieHeader(cookies), Accept: 'application/json' },
+    headers: withForwardedFor(forwardedFor, { Cookie: cookieHeader(cookies), Accept: 'application/json' }),
     signal: AbortSignal.timeout(LOGIN_TIMEOUT_MS),
   }).catch(() => null);
   if (profile !== null && profile.status === 200) {
@@ -469,6 +483,8 @@ export async function weblateLoginTotp(
   /** Username from the first phase — the resolved identity when the API
    *  cannot tell us (no /api/user/ on every instance). */
   username: string = 'totp',
+  /** Originating client IP, forwarded to Weblate (X-Forwarded-For). */
+  forwardedFor: string = '',
   fetchImpl: LoginFetch = fetch,
 ): Promise<{ status: 'ok'; cookies: Record<string, string>; csrfToken: string; username: string }> {
   const body = new URLSearchParams({
@@ -478,11 +494,11 @@ export async function weblateLoginTotp(
   const res = await loginFetch(fetchImpl, twofactorUrl, {
     method: 'POST',
     redirect: 'manual',
-    headers: {
+    headers: withForwardedFor(forwardedFor, {
       'Content-Type': 'application/x-www-form-urlencoded',
       Cookie: cookieHeader(cookies),
       Referer: twofactorUrl,
-    },
+    }),
     body: body.toString(),
   });
   let jar = mergeCookies(cookies, res.headers.getSetCookie());
@@ -510,7 +526,7 @@ export async function weblateLoginTotp(
     last = await loginFetch(fetchImpl, new URL(location, baseUrl).toString(), {
       method: 'GET',
       redirect: 'manual',
-      headers: { Cookie: cookieHeader(jar) },
+      headers: withForwardedFor(forwardedFor, { Cookie: cookieHeader(jar) }),
     });
     jar = mergeCookies(jar, last.headers.getSetCookie());
     logWarn(
@@ -525,7 +541,7 @@ export async function weblateLoginTotp(
     throw new LoginError('Invalid or expired authentication code.', true);
   }
 
-  const outcome = await finishLogin(fetchImpl, baseUrl, jar, username);
+  const outcome = await finishLogin(fetchImpl, baseUrl, jar, username, forwardedFor);
   if (outcome.status !== 'ok') {
     logWarn('[auth] second factor: session still pending a second factor after submit');
     throw new LoginError(
