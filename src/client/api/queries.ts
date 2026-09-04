@@ -273,6 +273,8 @@ export interface BulkStateResult {
   skipped: number;
   /** Cells in the selection but out of scope (missing, read-only, onlyStates mismatch). */
   notApplicable: number;
+  /** Cells already in the requested state (no-op). */
+  alreadyInState: number;
   firstError?: string;
 }
 
@@ -297,6 +299,7 @@ export function useBulkState() {
           failed: number;
           skipped?: number;
           notApplicable?: number;
+          alreadyInState?: number;
           firstError?: string;
           error?: string;
         }>(`/bulk-state/${jobId}`);
@@ -308,6 +311,7 @@ export function useBulkState() {
             failed: st.failed,
             skipped: st.skipped ?? 0,
             notApplicable: st.notApplicable ?? 0,
+            alreadyInState: st.alreadyInState ?? 0,
             ...(st.firstError !== undefined ? { firstError: st.firstError } : {}),
           };
         }

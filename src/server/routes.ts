@@ -89,6 +89,8 @@ interface BulkJob {
   skipped: number;
   /** Cells in the selection but out of scope (missing, read-only, onlyStates mismatch). */
   notApplicable: number;
+  /** Cells already in the requested state (no-op). */
+  alreadyInState: number;
   /** Detail of the first failed patch, for surfacing the real reason. */
   firstError: string | null;
   total: number;
@@ -377,11 +379,13 @@ export function createRouter(
     }
   });
 
-  /** 'id-list' keys: uploaded list (by id) or inline comma-separated. */
+  /** 'id-list' keys: uploaded list (by id) or inline comma-separated.
+   *  Empty strings mean "not provided" (the UI bulk request always carries
+   *  both fields; only the non-empty one applies). */
   const resolveContextKeys = (query: { listId?: string; ids?: string }): Set<string> => {
     let keys: string[] = [];
-    if (query.listId !== undefined) keys = idLists.get(query.listId) ?? [];
-    else if (query.ids !== undefined) keys = query.ids.split(',');
+    if (query.listId !== undefined && query.listId !== '') keys = idLists.get(query.listId) ?? [];
+    else if (query.ids !== undefined && query.ids !== '') keys = query.ids.split(',');
     return new Set(keys.map((k) => k.trim()).filter((k) => k !== ''));
   };
 
@@ -489,6 +493,7 @@ export function createRouter(
       const languages = new Set(body.languages);
       const targets: Array<{ unitId: number; target: string[]; cell: Cell }> = [];
       let skipped = 0;
+      let alreadyInState = 0;
       // Cells present in the selection but outside this action's scope
       // (missing cell, read-only, or not matching onlyStates) — counted so
       // the client can explain "0 modified" outcomes.
@@ -500,7 +505,10 @@ export function createRouter(
             notApplicable++;
             continue;
           }
-          if (cell.state === body.state) continue; // no-op
+          if (cell.state === body.state) { // no-op — already in the target state
+            alreadyInState++;
+            continue;
+          }
           if (body.onlyStates !== undefined && !body.onlyStates.includes(cell.state)) {
             notApplicable++;
             continue;
@@ -545,6 +553,7 @@ export function createRouter(
         failed: 0,
         skipped,
         notApplicable,
+        alreadyInState,
         firstError: null,
         total: targets.length,
         error: null,
@@ -607,6 +616,7 @@ export function createRouter(
       failed: job.failed,
       skipped: job.skipped,
       notApplicable: job.notApplicable,
+      alreadyInState: job.alreadyInState,
       ...(job.firstError !== null ? { firstError: job.firstError } : {}),
       ...(job.error !== null ? { error: job.error } : {}),
     });

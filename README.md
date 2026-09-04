@@ -56,12 +56,12 @@ Besides the UI API (`/api/v1`), the server exposes string management for
 external callers — authenticated with a **Weblate API key**
 (`Authorization: Token <key>` or `X-API-Key`; permissions follow the key):
 
-- **REST** at `/api/rest/v1`: list projects/components, batch-create strings,
-  patch/delete translations by context key, and `POST /export`
-  (documented in the OpenAPI UI, see below).
+- **REST** at `/api/rest/v1`: list projects/components, list/search strings
+  (`GET .../strings`), batch-create strings, patch/delete translations by
+  context key, and `POST /export` (documented in the OpenAPI UI, see below).
 - **MCP** at `/mcp/v1`: the same operations as MCP tools over streamable
   HTTP (stateless, JSON responses): `list_projects`, `list_components`,
-  `create_strings`, `patch_translations`, `delete_translation`.
+  `list_strings`, `create_strings`, `patch_translations`, `delete_translation`.
 - **UI** at `/api/v1/export` (same body; session-authenticated) and
   an Export dialog in the grid — or a multi-component export panel before any
   project is selected. The UI route runs the export as a background job: the

@@ -16,6 +16,7 @@ import { z } from 'zod';
 import {
   createItemsSchema,
   createStrings,
+  listStrings,
   deleteTranslation,
   patchTranslations,
   translationsPatchSchema,
@@ -105,6 +106,56 @@ function buildServer(api: WeblateApi, registry: CacheRegistry): McpServer {
       inputSchema: { project },
     },
     async ({ project: p }) => call(async () => ({ results: await api.listComponents(p) })),
+  );
+
+  server.registerTool(
+    'list_strings',
+    {
+      title: 'List strings',
+      description:
+        'Read-only search/lookup of the strings of one component. Filters combine with AND, ' +
+        'except `contexts` (exact keys — short-circuits everything else, ideal for existence ' +
+        'checks or verifying what create_strings produced). `context_prefix` browses a ' +
+        'namespace (e.g. "NAV."), `text_contains` matches the text of `language` case-' +
+        'insensitively (default the source language). `languages` adds translations ' +
+        '(target + state) to the results. Paging via limit (max 500) + offset. ' +
+        'No results is an empty list, not an error.',
+      inputSchema: {
+        project,
+        component,
+        contexts: z
+          .array(z.string().min(1))
+          .optional()
+          .describe('Exact context keys; when given, all other filters are ignored'),
+        context_prefix: z.string().optional().describe('Context starts with (e.g. "NAV.")'),
+        text_contains: z
+          .string()
+          .optional()
+          .describe('Case-insensitive substring of the text in `language`'),
+        language: z
+          .string()
+          .optional()
+          .describe('Language searched / returned as source (default: source language)'),
+        languages: z
+          .array(z.string().min(1))
+          .optional()
+          .describe('Translations to include in the results (default: none)'),
+        limit: z.number().int().min(1).max(500).optional().describe('Page size (default 100)'),
+        offset: z.number().int().min(0).optional().describe('Pagination offset (default 0)'),
+      },
+    },
+    async ({ project: p, component: c, contexts, context_prefix, text_contains, language, languages, limit, offset }) =>
+      call(() =>
+        listStrings(api, p, c, {
+          contexts,
+          contextPrefix: context_prefix,
+          textContains: text_contains,
+          language,
+          languages,
+          limit,
+          offset,
+        }),
+      ),
   );
 
   server.registerTool(

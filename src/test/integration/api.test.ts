@@ -279,8 +279,8 @@ describe('POST /api/v1/bulk-state', () => {
       .expect(200);
 
     // Server scope rules mirrored: "Edited" applies only to state-10 cells
-    // with content; state-20 cells are silent no-ops; everything else
-    // (missing, read-only, other states) is reported as notApplicable.
+    // with content; state-20 cells are no-ops (alreadyInState); everything
+    // else (missing, read-only, other states) is reported as notApplicable.
     const cells = contexts.flatMap((r) => ['de', 'fr'].map((l) => r.cells[l]));
     const inScope = cells.filter(
       (c) => c !== undefined && c.state === 10 && c.target.some((t) => t.trim() !== ''),
@@ -288,18 +288,124 @@ describe('POST /api/v1/bulk-state', () => {
     const notInScope = cells.filter(
       (c) => c === undefined || c.state === 100 || (c.state !== 10 && c.state !== 20),
     ).length;
+    const already = cells.filter((c) => c !== undefined && c.state === 20).length;
 
     const { jobId, total } = start.body as { jobId: string; total: number };
     expect(total).toBe(inScope);
 
-    let last: { status: string; done: number; notApplicable: number } | null = null;
+    let last: { status: string; done: number; notApplicable: number; alreadyInState: number } | null = null;
     for (let i = 0; i < 20; i++) {
       const res = await agent.get(`/api/v1/bulk-state/${jobId}`).expect(200);
-      last = res.body as { status: string; done: number; notApplicable: number };
+      last = res.body as { status: string; done: number; notApplicable: number; alreadyInState: number };
       if (last.status !== 'running') break;
       await sleep(25);
     }
-    expect(last).toMatchObject({ status: 'done', done: inScope, notApplicable: notInScope });
+    expect(last).toMatchObject({
+      status: 'done',
+      done: inScope,
+      notApplicable: notInScope,
+      alreadyInState: already,
+    });
+  });
+
+  it("id-list filter (inline ids AND uploaded listId): 'Edited' moves needs-editing cells", async () => {
+    const { app } = makeApp();
+    const agent = request(app);
+    const page = await getRowsUntilComplete(
+      agent,
+      'project=friendly-suite&component=web-ui&limit=200',
+    );
+
+    // The id-list matches CONTEXT keys. Build one from rows whose de cell
+    // is currently needs-editing with content (where "Edited" WILL have an
+    // effect), plus a decoy context whose de cell is not in state 10.
+    const editableContexts = page.rows
+      .filter(
+        (r) =>
+          r.context !== '' &&
+          r.cells['de'] !== undefined &&
+          r.cells['de']!.state === 10 &&
+          r.cells['de']!.target.some((t) => t.trim() !== ''),
+      )
+      .map((r) => r.context);
+    expect(editableContexts.length).toBeGreaterThan(0);
+    const decoy = page.rows.find(
+      (r) =>
+        r.context !== '' &&
+        !editableContexts.includes(r.context) &&
+        r.cells['de'] !== undefined &&
+        r.cells['de']!.state !== 10,
+    );
+    const listContexts = [...editableContexts, ...(decoy !== undefined ? [decoy.context] : [])];
+    const upload = await agent.post('/api/v1/id-lists').send({ keys: listContexts }).expect(200);
+    const { listId } = upload.body as { listId: string };
+
+    // Exactly what the UI sends: small lists travel inline (ids=…, listId
+    // ''), larger ones as listId (ids=''). Both must resolve the same
+    // context set — the inline variant used to resolve to NOTHING because
+    // the empty listId string shadowed the ids field.
+    const deliveries = [
+      { ids: listContexts.join(','), listId: '' },
+      { ids: '', listId },
+    ];
+    for (const delivery of deliveries) {
+      const filtered = await getRowsUntilComplete(
+        agent,
+        `project=friendly-suite&component=web-ui&filter=id-list&limit=200&ids=${encodeURIComponent(delivery.ids)}&listId=${delivery.listId}`,
+      );
+      const filteredKeys = filtered.rows.map((r) => r.key);
+      expect(filtered.rows).toHaveLength(listContexts.length);
+
+      const start = await agent
+        .post('/api/v1/bulk-state')
+        .send({
+          project: 'friendly-suite',
+          component: 'web-ui',
+          filter: 'id-list',
+          ...delivery,
+          selection: { all: false, keys: filteredKeys },
+          state: 20,
+          onlyStates: [10], // "Edited"
+          languages: ['de'],
+        })
+        .expect(200);
+      const { jobId, total } = start.body as { jobId: string; total: number };
+      expect(total).toBe(editableContexts.length);
+
+      let last: { status: string; done: number; failed: number } | null = null;
+      for (let i = 0; i < 100; i++) {
+        const res = await agent.get(`/api/v1/bulk-state/${jobId}`).expect(200);
+        last = res.body as { status: string; done: number; failed: number };
+        if (last.status !== 'running') break;
+        await sleep(25);
+      }
+      expect(last).toMatchObject({ status: 'done', done: editableContexts.length, failed: 0 });
+
+      // The edited rows left the needs-editing set; the decoy remains.
+      const after = await getRowsUntilComplete(
+        agent,
+        `project=friendly-suite&component=web-ui&filter=needs-editing&limit=200`,
+      );
+      const remaining = after.rows.filter((r) => editableContexts.includes(r.context));
+      expect(remaining).toHaveLength(0);
+
+      // Re-flip only the editable rows for the next delivery mode (leave
+      // the decoy in its original state).
+      const again = await getRowsUntilComplete(
+        agent,
+        `project=friendly-suite&component=web-ui&filter=id-list&limit=200&ids=${encodeURIComponent(delivery.ids)}&listId=${delivery.listId}`,
+      );
+      for (const row of again.rows) {
+        if (!editableContexts.includes(row.context)) continue;
+        const cell = row.cells['de'];
+        if (cell !== undefined && cell.state === 20) {
+          await agent
+            .patch(`/api/v1/units/${cell.unitId}`)
+            .send({ target: cell.target, state: 10 })
+            .expect(200);
+        }
+      }
+    }
   });
 
   it("onlyStates limits 'Edited' to cells currently in needs-editing", async () => {

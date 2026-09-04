@@ -256,6 +256,7 @@ export function App() {
           const parts = [`Updated ${st.done} translation${st.done === 1 ? '' : 's'}`];
           if (st.failed > 0) parts.push(`${st.failed} failed`);
           if (st.skipped > 0) parts.push(`${st.skipped} skipped (empty)`);
+          if (st.alreadyInState > 0) parts.push(`${st.alreadyInState} already in this state`);
           if (st.notApplicable > 0) parts.push(`${st.notApplicable} not affected (state didn't match)`);
           if (st.firstError !== undefined) parts.push(`e.g. ${st.firstError}`);
           toast(parts.join(', '), st.failed > 0 ? 'error' : 'success');

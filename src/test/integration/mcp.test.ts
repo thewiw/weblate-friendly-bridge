@@ -73,7 +73,7 @@ describe('MCP protocol', () => {
     expect(typeof body.result.protocolVersion).toBe('string');
   });
 
-  it('lists the five string-management tools', async () => {
+  it('lists the six string-management tools', async () => {
     const { app } = makeApp();
     const body = await rpc(request(app), 'tools/list', {}, 2);
     const tools = body.result.tools as Array<{ name: string }>;
@@ -82,12 +82,38 @@ describe('MCP protocol', () => {
       'delete_translation',
       'list_components',
       'list_projects',
+      'list_strings',
       'patch_translations',
     ]);
   });
 });
 
 describe('MCP tools', () => {
+  it('list_strings: exact contexts with translations, and paging', async () => {
+    const { app } = makeApp();
+    const agent = request(app);
+    const call = async (arguments_: Record<string, unknown>) =>
+      toolJson<{ total: number; results: Array<{ context: string; translations: Record<string, unknown> }> }>(
+        (
+          await rpc(agent, 'tools/call', { name: 'list_strings', arguments: arguments_ }, 3)
+        ).result,
+      );
+
+    const browse = await call({ project: 'friendly-suite', component: 'web-ui', context_prefix: 'ctx-', limit: 3 });
+    expect(browse.total).toBeGreaterThan(0);
+    expect(browse.results).toHaveLength(3);
+    const contexts = browse.results.map((r) => r.context as string);
+
+    const exact = await call({
+      project: 'friendly-suite',
+      component: 'web-ui',
+      contexts: [contexts[0]],
+      languages: ['fr'],
+    });
+    expect(exact.total).toBe(1);
+    expect(exact.results[0]!.translations['fr']).toHaveProperty('state');
+  });
+
   it('lists projects and components', async () => {
     const { app } = makeApp();
     const agent = request(app);

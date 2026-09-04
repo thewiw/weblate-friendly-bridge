@@ -221,6 +221,96 @@ export const openApiSpec = {
         },
       },
     },
+    '/api/rest/v1/projects/{project}/components/{component}/strings': {
+      get: {
+        tags: ['Strings'],
+        operationId: 'listStrings',
+        summary: 'Search/lookup the strings of a component (read-only)',
+        description: [
+          'Filters combine with AND, except `contexts` (exact context keys — short-circuits',
+          'all other filters). `context_prefix` matches contexts starting with the value;',
+          '`text_contains` matches case-insensitively against the text of `language`',
+          '(default: the component’s source language). Results carry `context` and the text',
+          'of the searched language as `source` (array of plural forms where applicable);',
+          'translations for the languages listed in `languages` are included when requested.',
+          'Paging via `limit` (max 500) and `offset`. An empty result set is not an error.',
+        ].join('\n'),
+        parameters: [
+          { name: 'project', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'component', in: 'path', required: true, schema: { type: 'string' } },
+          {
+            name: 'contexts',
+            in: 'query',
+            description: 'Comma-separated exact context keys (overrides other filters).',
+            schema: { type: 'string' },
+          },
+          {
+            name: 'context_prefix',
+            in: 'query',
+            description: 'Context starts with this value.',
+            schema: { type: 'string' },
+          },
+          {
+            name: 'text_contains',
+            in: 'query',
+            description: 'Case-insensitive substring of the text in `language`.',
+            schema: { type: 'string' },
+          },
+          {
+            name: 'language',
+            in: 'query',
+            description: 'Language searched / returned as source (default: source language).',
+            schema: { type: 'string' },
+          },
+          {
+            name: 'languages',
+            in: 'query',
+            description: 'Comma-separated translations to include (target + state).',
+            schema: { type: 'string' },
+          },
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 500, default: 100 } },
+          { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } },
+        ],
+        responses: {
+          200: jsonResponse(
+            {
+              type: 'object',
+              required: ['total', 'offset', 'limit', 'results'],
+              properties: {
+                total: { type: 'integer', description: 'Total matches across all pages' },
+                offset: { type: 'integer' },
+                limit: { type: 'integer' },
+                results: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    required: ['context', 'source', 'translations'],
+                    properties: {
+                      context: { type: 'string' },
+                      source: { oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
+                      translations: {
+                        type: 'object',
+                        additionalProperties: {
+                          type: 'object',
+                          properties: {
+                            target: { oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
+                            state: { type: 'integer', enum: [0, 10, 20, 30, 100] },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            'Matching strings; `translations` is {} when no languages were requested.',
+          ),
+          401: errorResponse('Missing or invalid API key'),
+          404: errorResponse('Unknown project/component/language'),
+          503: errorResponse('The API key was rejected by Weblate'),
+        },
+      },
+    },
     '/api/rest/v1/projects/{project}/components/{component}/translations': {
       post: {
         tags: ['Strings'],

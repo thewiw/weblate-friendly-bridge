@@ -61,6 +61,7 @@ describe('WFB_OPENAPI gating of the OpenAPI spec', () => {
         '/api/rest/v1/export',
         '/api/rest/v1/projects',
         '/api/rest/v1/projects/{project}/components',
+        '/api/rest/v1/projects/{project}/components/{component}/strings',
         '/api/rest/v1/projects/{project}/components/{component}/translations',
         '/api/rest/v1/projects/{project}/components/{component}/translations/{context}',
       ]);

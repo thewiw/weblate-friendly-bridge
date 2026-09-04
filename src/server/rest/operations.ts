@@ -13,7 +13,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import type { UnitState, WeblateUnit } from '../../shared/weblate-dto.js';
+import type { UnitState, WeblateTranslation, WeblateUnit } from '../../shared/weblate-dto.js';
 import { UpstreamError } from '../http-errors.js';
 import { isNotFound, unknownComponentError } from '../component-lookup.js';
 import type { CacheRegistry } from '../cache/cache-registry.js';
@@ -77,6 +77,16 @@ const sourceLanguageOf = async (
   project: string,
   component: string,
 ): Promise<string> => {
+  const translations = await listTranslationsOr404(api, project, component);
+  return translations.find((t) => t.is_source)?.language.code ?? '';
+};
+
+/** Lists a component's translations, mapping "not there" to a precise 404. */
+const listTranslationsOr404 = async (
+  api: WeblateApi,
+  project: string,
+  component: string,
+): Promise<WeblateTranslation[]> => {
   let translations;
   try {
     translations = await api.listTranslations(api.translationsUrlFor(project, component));
@@ -87,7 +97,7 @@ const sourceLanguageOf = async (
   if (translations.length === 0) {
     throw await unknownComponentError(api, project, component);
   }
-  return translations.find((t) => t.is_source)?.language.code ?? '';
+  return translations;
 };
 
 /** First unit id of a context within one translation (null = none). */
@@ -365,5 +375,141 @@ export async function deleteTranslation(
     context,
     language,
     ...(isSource ? { wholeString: true } : {}),
+  };
+}
+// ---- Read-only string lookup (list_strings) ----
+
+/** Max page size for listStrings (callers page via offset). */
+export const MAX_LIST_STRINGS = 500;
+
+export interface ListStringsOptions {
+  /** Exact context keys — short-circuits all other filters. */
+  contexts?: string[];
+  /** Context starts with (namespace browsing). */
+  contextPrefix?: string;
+  /** Case-insensitive substring match against the text of `language`. */
+  textContains?: string;
+  /** Language searched and returned as `source` (default: source language). */
+  language?: string;
+  /** Translations included in the results (default: none). */
+  languages?: string[];
+  limit?: number;
+  offset?: number;
+}
+
+/** Text of one unit: single string, or array of plural forms. */
+const textOf = (values: string[]): string | string[] =>
+  values.length > 1 ? values : (values[0] ?? '');
+
+/** All units of one translation, keyed by content_hash (insertion order). */
+const unitsByHash = async (
+  api: WeblateApi,
+  project: string,
+  component: string,
+  language: string,
+): Promise<Map<number, WeblateUnit>> => {
+  const map = new Map<number, WeblateUnit>();
+  for await (const unit of api.listUnits(api.unitsUrlFor(project, component, language))) {
+    map.set(unit.content_hash, unit);
+  }
+  return map;
+};
+
+/**
+ * Read-only search over the strings of one component. `contexts` is an
+ * exact-match lookup (one targeted Weblate search per key — existence
+ * checks and post-create verification); the other filters scan the units
+ * of the search language and are applied in code (case-insensitive), so
+ * behavior never depends on Weblate's q operator semantics. Unknown
+ * project/component answer the same precise 404s as the write operations;
+ * an empty result set is not an error.
+ */
+export async function listStrings(
+  api: WeblateApi,
+  project: string,
+  component: string,
+  opts: ListStringsOptions = {},
+): Promise<{
+  total: number;
+  offset: number;
+  limit: number;
+  results: Array<{
+    context: string;
+    source: string | string[];
+    translations: Record<string, { target: string | string[]; state: UnitState }>;
+  }>;
+}> {
+  const translations = await listTranslationsOr404(api, project, component);
+  const available = new Set(translations.map((t) => t.language.code));
+  const sourceLanguage = translations.find((t) => t.is_source)?.language.code ?? '';
+
+  const searchLanguage = opts.language?.trim() !== '' && opts.language !== undefined
+    ? opts.language.trim()
+    : sourceLanguage;
+  if (!available.has(searchLanguage)) {
+    throw new UpstreamError(
+      404,
+      `Unknown language "${searchLanguage}" in ${project}/${component} — available: ${[...available].join(', ')}.`,
+    );
+  }
+
+  // The searched strings, in a stable order.
+  let units: WeblateUnit[];
+  const contexts = (opts.contexts ?? [])
+    .map((c) => c.trim())
+    .filter((c) => c !== '');
+  if (contexts.length > 0) {
+    // Exact-match lookups: one targeted search per context (Weblate's
+    // context: operator is a substring match — exact-check every hit).
+    const found = new Map<number, WeblateUnit>();
+    for (const context of contexts) {
+      for await (const unit of api.listUnits(
+        api.unitsUrlFor(project, component, searchLanguage),
+        `context:${context}`,
+      )) {
+        if (unit.context === context && !found.has(unit.content_hash)) {
+          found.set(unit.content_hash, unit);
+        }
+      }
+    }
+    // Preserve the caller's context order, dropping missing ones.
+    const byContext = new Map([...found.values()].map((u) => [u.context, u]));
+    units = contexts.map((c) => byContext.get(c)).filter((u): u is WeblateUnit => u !== undefined);
+  } else {
+    units = [...(await unitsByHash(api, project, component, searchLanguage)).values()];
+    const prefix = opts.contextPrefix?.trim();
+    if (prefix !== undefined && prefix !== '') {
+      units = units.filter((u) => u.context.startsWith(prefix));
+    }
+    const text = opts.textContains?.trim().toLowerCase();
+    if (text !== undefined && text !== '') {
+      units = units.filter((u) => u.target.some((t) => t.toLowerCase().includes(text)));
+    }
+  }
+
+  const requested = (opts.languages ?? []).filter((l) => available.has(l));
+  const transMaps = new Map<string, Map<number, WeblateUnit>>();
+  for (const lang of requested) {
+    transMaps.set(lang, await unitsByHash(api, project, component, lang));
+  }
+
+  const limit = Math.min(Math.max(opts.limit ?? 100, 1), MAX_LIST_STRINGS);
+  const offset = Math.max(opts.offset ?? 0, 0);
+  const page = units.slice(offset, offset + limit);
+
+  return {
+    total: units.length,
+    offset,
+    limit,
+    results: page.map((unit) => ({
+      context: unit.context,
+      source: textOf(unit.target),
+      translations: Object.fromEntries(
+        [...transMaps.entries()].map(([lang, map]) => {
+          const t = map.get(unit.content_hash);
+          return [lang, { target: textOf(t?.target ?? []), state: t?.state ?? 0 }];
+        }),
+      ),
+    })),
   };
 }

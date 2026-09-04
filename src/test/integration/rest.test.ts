@@ -94,6 +94,41 @@ describe('REST listings', () => {
       'web-ui',
     ]);
   });
+
+  it('list_strings: contexts exact-match, translations opt-in, 404s', async () => {
+    const { app } = makeApp();
+    const agent = request(app);
+
+    const page = await agent
+      .get('/api/rest/v1/projects/friendly-suite/components/web-ui/strings?context_prefix=ctx-&limit=3')
+      .set(AUTH)
+      .expect(200);
+    expect(page.body.results).toHaveLength(3);
+    expect(page.body.results[0].translations).toEqual({}); // lean by default
+    const contexts = (page.body.results as Array<{ context: string }>).map((r) => r.context);
+
+    const exact = await agent
+      .get(
+        `/api/rest/v1/projects/friendly-suite/components/web-ui/strings?contexts=${contexts[0]},NO.SUCH.KEY&languages=fr`,
+      )
+      .set(AUTH)
+      .expect(200);
+    expect(exact.body.total).toBe(1);
+    expect((exact.body.results as Array<{ translations: Record<string, unknown> }>)[0]!.translations['fr']).toHaveProperty('state');
+
+    await agent
+      .get('/api/rest/v1/projects/friendly-suite/components/web-ui/strings?language=xx')
+      .set(AUTH)
+      .expect(404);
+    // Unknown component → the precise error; no key → 401 (route is behind auth).
+    await agent
+      .get('/api/rest/v1/projects/friendly-suite/components/nope/strings')
+      .set(AUTH)
+      .expect(404);
+    await agent
+      .get('/api/rest/v1/projects/friendly-suite/components/web-ui/strings')
+      .expect(401);
+  });
 });
 
 describe('REST create translations', () => {

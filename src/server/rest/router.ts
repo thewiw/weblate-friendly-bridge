@@ -12,7 +12,7 @@ import type { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { exportRequestSchema, type ExportRequest } from '../../shared/export.js';
 import { describeExportRequest, packageExport, runExport } from '../export/export-service.js';
-import { createItemsSchema, createStrings, deleteTranslation, patchTranslations, translationsPatchSchema } from './operations.js';
+import { createItemsSchema, createStrings, deleteTranslation, listStrings, patchTranslations, translationsPatchSchema } from './operations.js';
 import { openApiSpec } from './openapi.js';
 import { UpstreamError } from '../http-errors.js';
 import { config } from '../config.js';
@@ -100,6 +100,30 @@ export function createRestRouter(opts: RestRouterOptions) {
   router.get('/projects/:project/components', async (req, res, next) => {
     try {
       res.json({ results: await restApi(req).listComponents(String(req.params.project)) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ---- Read-only string lookup (list_strings) ----
+
+  router.get('/projects/:project/components/:component/strings', async (req, res, next) => {
+    try {
+      // contexts is a comma-separated list; languages likewise.
+      const split = (v: unknown): string[] | undefined =>
+        typeof v === 'string' && v.trim() !== ''
+          ? v.split(',').map((s) => s.trim()).filter((s) => s !== '')
+          : undefined;
+      const result = await listStrings(restApi(req), String(req.params.project), String(req.params.component), {
+        contexts: split(req.query.contexts),
+        contextPrefix: typeof req.query.context_prefix === 'string' ? req.query.context_prefix : undefined,
+        textContains: typeof req.query.text_contains === 'string' ? req.query.text_contains : undefined,
+        language: typeof req.query.language === 'string' ? req.query.language : undefined,
+        languages: split(req.query.languages),
+        limit: typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined,
+        offset: typeof req.query.offset === 'string' ? Number(req.query.offset) : undefined,
+      });
+      res.json(result);
     } catch (err) {
       next(err);
     }
