@@ -87,6 +87,8 @@ interface BulkJob {
   failed: number;
   /** Cells left untouched (e.g. empty translations for content states). */
   skipped: number;
+  /** Cells in the selection but out of scope (missing, read-only, onlyStates mismatch). */
+  notApplicable: number;
   /** Detail of the first failed patch, for surfacing the real reason. */
   firstError: string | null;
   total: number;
@@ -487,12 +489,22 @@ export function createRouter(
       const languages = new Set(body.languages);
       const targets: Array<{ unitId: number; target: string[]; cell: Cell }> = [];
       let skipped = 0;
+      // Cells present in the selection but outside this action's scope
+      // (missing cell, read-only, or not matching onlyStates) — counted so
+      // the client can explain "0 modified" outcomes.
+      let notApplicable = 0;
       for (const row of selected) {
         for (const lang of languages) {
           const cell = row.cells[lang];
-          if (cell === undefined || cell.state === 100) continue; // read-only
+          if (cell === undefined || cell.state === 100) { // read-only
+            notApplicable++;
+            continue;
+          }
           if (cell.state === body.state) continue; // no-op
-          if (body.onlyStates !== undefined && !body.onlyStates.includes(cell.state)) continue;
+          if (body.onlyStates !== undefined && !body.onlyStates.includes(cell.state)) {
+            notApplicable++;
+            continue;
+          }
           // Weblate rejects state 10/20/30 with an empty target (a
           // translated string must have content) — leave empty
           // translations untouched instead of failing them one by one.
@@ -532,6 +544,7 @@ export function createRouter(
         done: 0,
         failed: 0,
         skipped,
+        notApplicable,
         firstError: null,
         total: targets.length,
         error: null,
@@ -593,6 +606,7 @@ export function createRouter(
       total: job.total,
       failed: job.failed,
       skipped: job.skipped,
+      notApplicable: job.notApplicable,
       ...(job.firstError !== null ? { firstError: job.firstError } : {}),
       ...(job.error !== null ? { error: job.error } : {}),
     });

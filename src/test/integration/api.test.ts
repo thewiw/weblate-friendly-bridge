@@ -243,6 +243,65 @@ describe('POST /api/v1/bulk-state', () => {
     }
   });
 
+  it('counts out-of-scope cells when onlyStates matches nothing (id-list + Edited)', async () => {
+    // The failing scenario: filter by an ID list, select all rows, then
+    // "Edited" (state 20, onlyStates [10]) — no cell is in state 10, so
+    // nothing can change, and the job must report WHY instead of a bare
+    // "0 modified".
+    const { app } = makeApp();
+    const agent = request(app);
+    const page = await getRowsUntilComplete(
+      agent,
+      'project=friendly-suite&component=web-ui&filter=untranslated&limit=200',
+    );
+    expect(page.rows.length).toBeGreaterThan(0);
+    const contexts = page.rows.filter((r) => r.context !== '').slice(0, 3);
+    expect(contexts.length).toBeGreaterThan(0);
+
+    const upload = await agent
+      .post('/api/v1/id-lists')
+      .send({ keys: contexts.map((r) => r.context) })
+      .expect(200);
+    const { listId } = upload.body as { listId: string };
+
+    const start = await agent
+      .post('/api/v1/bulk-state')
+      .send({
+        project: 'friendly-suite',
+        component: 'web-ui',
+        filter: 'id-list',
+        listId,
+        selection: { all: true, keys: [] },
+        state: 20,
+        onlyStates: [10], // "Edited"
+        languages: ['de', 'fr'],
+      })
+      .expect(200);
+
+    // Server scope rules mirrored: "Edited" applies only to state-10 cells
+    // with content; state-20 cells are silent no-ops; everything else
+    // (missing, read-only, other states) is reported as notApplicable.
+    const cells = contexts.flatMap((r) => ['de', 'fr'].map((l) => r.cells[l]));
+    const inScope = cells.filter(
+      (c) => c !== undefined && c.state === 10 && c.target.some((t) => t.trim() !== ''),
+    ).length;
+    const notInScope = cells.filter(
+      (c) => c === undefined || c.state === 100 || (c.state !== 10 && c.state !== 20),
+    ).length;
+
+    const { jobId, total } = start.body as { jobId: string; total: number };
+    expect(total).toBe(inScope);
+
+    let last: { status: string; done: number; notApplicable: number } | null = null;
+    for (let i = 0; i < 20; i++) {
+      const res = await agent.get(`/api/v1/bulk-state/${jobId}`).expect(200);
+      last = res.body as { status: string; done: number; notApplicable: number };
+      if (last.status !== 'running') break;
+      await sleep(25);
+    }
+    expect(last).toMatchObject({ status: 'done', done: inScope, notApplicable: notInScope });
+  });
+
   it("onlyStates limits 'Edited' to cells currently in needs-editing", async () => {
     const { app } = makeApp();
     const agent = request(app);

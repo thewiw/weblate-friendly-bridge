@@ -265,14 +265,25 @@ export interface BulkStateVars {
   onProgress?: (done: number, total: number) => void;
 }
 
+/** Outcome of a settled bulk job (returned by useBulkState). */
+export interface BulkStateResult {
+  done: number;
+  total: number;
+  failed: number;
+  skipped: number;
+  /** Cells in the selection but out of scope (missing, read-only, onlyStates mismatch). */
+  notApplicable: number;
+  firstError?: string;
+}
+
 /**
  * Bulk status change: starts a server job, polls until it settles.
- * Resolves with { done, failed } — never with the rows themselves.
+ * Resolves with the job outcome — never with the rows themselves.
  */
 export function useBulkState() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (vars: BulkStateVars) => {
+    mutationFn: async (vars: BulkStateVars): Promise<BulkStateResult> => {
       const { jobId } = await api<{ jobId: string }>('/bulk-state', {
         method: 'POST',
         body: JSON.stringify(vars),
@@ -285,11 +296,21 @@ export function useBulkState() {
           total: number;
           failed: number;
           skipped?: number;
+          notApplicable?: number;
           firstError?: string;
           error?: string;
         }>(`/bulk-state/${jobId}`);
         vars.onProgress?.(st.done, st.total);
-        if (st.status === 'done') return st;
+        if (st.status === 'done') {
+          return {
+            done: st.done,
+            total: st.total,
+            failed: st.failed,
+            skipped: st.skipped ?? 0,
+            notApplicable: st.notApplicable ?? 0,
+            ...(st.firstError !== undefined ? { firstError: st.firstError } : {}),
+          };
+        }
         if (st.status === 'error') {
           throw new Error(st.error ?? 'Bulk update failed');
         }
